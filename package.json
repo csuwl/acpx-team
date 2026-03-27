@@ -1,0 +1,46 @@
+{
+  "name": "acpx-skill",
+  "version": "0.2.0",
+  "description": "Multi-agent collaboration skill for Claude Code — orchestrate AI agent teams via ACP with structured protocols, role-specialized councils, and plan-first workflows",
+  "keywords": [
+    "claude-code",
+    "skill",
+    "multi-agent",
+    "acpx",
+    "acp",
+    "agent-client-protocol",
+    "code-review",
+    "collaboration",
+    "council",
+    "debate",
+    "consensus",
+    "openclaw"
+  ],
+  "bin": {
+    "acpx-council": "./acpx/bin/acpx-council"
+  },
+  "files": [
+    "acpx/"
+  ],
+  "scripts": {
+    "test": "bash -n acpx/bin/acpx-council && bash -n acpx/lib/*.sh && echo 'All scripts pass syntax check'",
+    "lint": "shellcheck acpx/bin/acpx-council acpx/lib/*.sh || true"
+  },
+  "dependencies": {},
+  "peerDependencies": {
+    "acpx": ">=0.1.0"
+  },
+  "peerDependenciesMeta": {
+    "acpx": {
+      "optional": true
+    }
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/csuwl/acpx-skill"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

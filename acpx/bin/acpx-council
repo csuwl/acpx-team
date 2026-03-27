@@ -1,0 +1,374 @@
+#!/usr/bin/env bash
+# acpx-council — High-level CLI for multi-agent collaboration
+# One command to run any protocol with any team preset
+#
+# Usage:
+#   acpx-council review <file>              # Auto code review
+#   acpx-council council <task>             # Full council with auto-protocol
+#   acpx-council debate <task>              # Adversarial debate
+#   acpx-council synthesize                 # Synthesize current workspace
+#   acpx-council execute                    # Execute plan from workspace
+#   acpx-council status                     # Show workspace status
+#   acpx-council roles [list|create|infer]   # Manage roles
+#   acpx-council workspace [init|cleanup|archive]  # Manage workspace
+#
+# Examples:
+#   acpx-council review src/auth.ts
+#   acpx-council council "Should we migrate from REST to tRPC?" --protocol adversarial
+#   acpx-council council "Add Redis caching to the API" --roles security,perf,testing
+#   acpx-council council "Review PR #42" --agents claude,codex,gemini --preset code_review
+#   acpx-council council "Refactor auth module" --single-agent opencode --sessions 3
+#   acpx-council status
+#   acpx-council execute
+#   acpx-council roles infer "Add Stripe payment integration"
+
+set -euo pipefail
+
+ACPX_ROOT="${ACPX_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+ACPX_WORKSPACE="${ACPX_WORKSPACE:-.acpx-workspace}"
+
+# Source libraries
+source "${ACPX_ROOT}/lib/workspace.sh"
+source "${ACPX_ROOT}/lib/roles.sh"
+source "${ACPX_ROOT}/lib/protocols.sh"
+
+# ─── Color Output ──────────────────────────────────────────────
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+info()  { echo -e "${BLUE}[acpx]${NC} $*"; }
+ok()    { echo -e "${GREEN}[ok]${NC} $*"; }
+warn()  { echo -e "${YELLOW}[warn]${NC} $*"; }
+err()   { echo -e "${RED}[error]${NC} $*" >&2; }
+
+# ─── Argument Parsing ──────────────────────────────────────────
+
+cmd="${1:-help}"
+shift || true
+
+# Default options
+PROTOCOL="auto"
+AGENTS="auto"
+ROLES="auto"
+ORCHESTRATOR="claude"
+PRESET=""
+TASK=""
+FILE=""
+SINGLE_AGENT=""
+NUM_SESSIONS=3
+
+parse_opts() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --protocol|-p)
+        PROTOCOL="$2"; shift 2 ;;
+      --agents|-a)
+        AGENTS="$2"; shift 2 ;;
+      --roles|-r)
+        ROLES="$2"; shift 2 ;;
+      --orchestrator|-o)
+        ORCHESTRATOR="$2"; shift 2 ;;
+      --preset|-t)
+        PRESET="$2"; shift 2 ;;
+      --single-agent|-s)
+        SINGLE_AGENT="$2"; shift 2 ;;
+      --sessions|-n)
+        NUM_SESSIONS="$2"; shift 2 ;;
+      --workspace|-w)
+        ACPX_WORKSPACE="$2"; shift 2 ;;
+      --help|-h)
+        usage; exit 0 ;;
+      *)
+        if [[ -z "$TASK" && -z "$FILE" ]]; then
+          # Check if it's a file path
+          if [[ -f "$1" ]]; then
+            FILE="$1"
+          else
+            TASK="$1"
+          fi
+        fi
+        shift ;;
+    esac
+  done
+}
+
+# ─── Commands ──────────────────────────────────────────────────
+
+cmd_review() {
+  local target="${FILE:-$1}"
+  if [[ ! -f "$target" ]]; then
+    err "File not found: $target"
+    exit 1
+  fi
+
+  local content
+  content=$(cat "$target")
+
+  local task="Review the file ${target} for bugs, security issues, performance problems, and code quality.
+File contents:
+\`\`\`
+${content}
+\`\`\`"
+
+  if [[ "$PROTOCOL" == "auto" ]]; then
+    PROTOCOL="role-council"
+  fi
+
+  if [[ "$ROLES" == "auto" ]]; then
+    ROLES="security,perf,testing,maintainer"
+  fi
+
+  info "Reviewing ${target}..."
+  cmd_council_impl "$task"
+}
+
+cmd_council() {
+  if [[ -z "$TASK" && -z "$FILE" ]]; then
+    err "Missing task description. Usage: acpx-council council <task>"
+    exit 1
+  fi
+
+  # If file provided, include its contents
+  local task="${TASK}"
+  if [[ -n "$FILE" ]]; then
+    local content
+    content=$(cat "$FILE")
+    task="${TASK}
+
+File: ${FILE}
+\`\`\`
+${content}
+\`\`\`"
+  fi
+
+  cmd_council_impl "$task"
+}
+
+cmd_council_impl() {
+  local task="$1"
+
+  # Handle single-agent multi-session mode
+  if [[ -n "$SINGLE_AGENT" ]]; then
+    info "Single-agent mode: using ${SINGLE_AGENT} with ${NUM_SESSIONS} sessions"
+    local -a agent_list=()
+    for i in $(seq 1 "$NUM_SESSIONS"); do
+      agent_list+=("${SINGLE_AGENT}")
+    done
+    AGENTS=$(IFS=,; echo "${agent_list[*]}")
+  fi
+
+  # Handle presets — map preset to roles
+  if [[ -n "$PRESET" ]]; then
+    case "$PRESET" in
+      code_review)         ROLES="security,perf,testing,maintainer,dx" ;;
+      security_audit)      ROLES="security,skeptic,architect,dx,testing" ;;
+      architecture_review) ROLES="architect,perf,skeptic,maintainer,testing" ;;
+      devil_advocate)      ROLES="skeptic,skeptic,architect,maintainer" ;;
+      balanced)            ROLES="neutral,neutral,neutral" ;;
+      build_deploy)        ROLES="architect,testing,maintainer" ;;
+      *)                   warn "Unknown preset: ${PRESET}. Using auto roles." ;;
+    esac
+  fi
+
+  # Auto-select protocol
+  if [[ "$PROTOCOL" == "auto" ]]; then
+    PROTOCOL=$(protocol_auto_select "$task")
+    info "Auto-selected protocol: ${PROTOCOL}"
+  fi
+
+  # Run the selected protocol
+  case "$PROTOCOL" in
+    fanout|fan-out|1)
+      protocol_fanout "$task" "$AGENTS" "$ORCHESTRATOR" ;;
+    deliberation|round-robin|2)
+      protocol_deliberation "$task" "$AGENTS" "$ORCHESTRATOR" ;;
+    role-council|council|3)
+      protocol_role_council "$task" "$AGENTS" "$ROLES" "$ORCHESTRATOR" ;;
+    adversarial|debate|4)
+      protocol_adversarial "$task" "$AGENTS" "$ORCHESTRATOR" ;;
+    pipeline|sequential|5)
+      protocol_pipeline "$task" "$AGENTS" "$ORCHESTRATOR" ;;
+    *)
+      protocol_role_council "$task" "$AGENTS" "$ROLES" "$ORCHESTRATOR" ;;
+  esac
+
+  ok "Council complete. Results in ${ACPX_WORKSPACE}/"
+  workspace_status
+}
+
+cmd_synthesize() {
+  if [[ ! -d "$ACPX_WORKSPACE" ]]; then
+    err "No active workspace. Run a council first."
+    exit 1
+  fi
+
+  local round="${1:-1}"
+  info "Synthesizing round ${round}..."
+  synthesize_round "$round" "$ORCHESTRATOR"
+  ok "Synthesis written to ${ACPX_WORKSPACE}/synynthesis.md"
+}
+
+cmd_execute() {
+  if [[ ! -f "$ACPX_WORKSPACE/plan.md" ]]; then
+    err "No plan found. Run a council first to generate a plan."
+    exit 1
+  fi
+
+  info "Executing plan..."
+  protocol_execute "$ACPX_WORKSPACE/plan.md" "$AGENTS" "$ORCHESTRATOR"
+  ok "Execution complete."
+}
+
+cmd_status() {
+  workspace_status
+}
+
+cmd_roles() {
+  local subcmd="${1:-list}"
+  shift || true
+
+  case "$subcmd" in
+    list|ls)
+      role_list
+      ;;
+    create|new)
+      if [[ -z "${1:-}" ]]; then
+        err "Usage: acpx-council roles create <name> [focus] [technologies]"
+        exit 1
+      fi
+      role_create "$1" "${2:-General analysis}" "${3:-}"
+      ;;
+    infer|auto)
+      if [[ -z "${1:-}" ]]; then
+        err "Usage: acpx-council roles infer <task description>"
+        exit 1
+      fi
+      info "Inferred roles for: $1"
+      role_infer_from_task "$1"
+      ;;
+    *)
+      err "Unknown subcommand: ${subcmd}"
+      echo "Available: list, create, infer"
+      exit 1
+      ;;
+  esac
+}
+
+cmd_workspace() {
+  local subcmd="${1:-status}"
+  shift || true
+
+  case "$subcmd" in
+    init)
+      if [[ -z "${1:-}" ]]; then
+        err "Usage: acpx-council workspace init <task>"
+        exit 1
+      fi
+      workspace_init "$1" "${2:-auto}"
+      ok "Workspace initialized at ${ACPX_WORKSPACE}"
+      ;;
+    cleanup|clean|rm)
+      workspace_cleanup
+      ok "Workspace cleaned up."
+      ;;
+    archive|save)
+      workspace_archive "${1:-council-$(date +%Y%m%d-%H%M%S)}"
+      ;;
+    status)
+      workspace_status
+      ;;
+    *)
+      err "Unknown subcommand: ${subcmd}"
+      echo "Available: init, cleanup, archive, status"
+      exit 1
+      ;;
+  esac
+}
+
+# ─── Usage ─────────────────────────────────────────────────────
+
+usage() {
+  cat <<'USAGE'
+acpx-council — Multi-agent collaboration CLI
+
+Usage:
+  acpx-council <command> [options] [task]
+
+Commands:
+  review <file>        Code review with auto-assigned expert roles
+  council <task>       Run a multi-agent council with auto-selected protocol
+  debate <task>        Adversarial debate (advocate vs critic + judge)
+  synthesize           Synthesize current workspace outputs into consensus
+  execute              Execute the plan from current workspace
+  status               Show current workspace status
+  roles <subcommand>   Manage roles (list, create, infer)
+  workspace <subcmd>   Manage workspace (init, cleanup, archive, status)
+
+Options:
+  --protocol, -p       Protocol: auto|fanout|deliberation|role-council|adversarial|pipeline
+  --agents, -a         Agents: auto|comma-separated (e.g., claude,codex,gemini)
+  --roles, -r          Roles: auto|comma-separated (e.g., security,perf,testing)
+  --orchestrator, -o   Synthesis agent (default: claude)
+  --preset, -t         Team preset: code_review|security_audit|architecture_review|devil_advocate|balanced|build_deploy
+  --single-agent, -s   Use one agent client with multiple sessions (e.g., -s opencode)
+  --sessions, -n       Number of sessions for single-agent mode (default: 3)
+  --workspace, -w      Workspace directory (default: .acpx-workspace)
+
+Examples:
+  # Quick code review
+  acpx-council review src/auth.ts
+
+  # Full council with auto-everything
+  acpx-council council "Should we use Redis or Memcached for session caching?"
+
+  # Adversarial debate
+  acpx-council council "Migrate to tRPC?" --protocol adversarial
+
+  # Single agent (OpenCode) with 5 role-playing sessions
+  acpx-council council "Refactor auth module" --single-agent opencode --sessions 5
+
+  # Custom roles
+  acpx-council council "Add Stripe integration" --roles "security,payments,testing,dx"
+
+  # Security audit preset
+  acpx-council council "Review login flow" --preset security_audit
+
+  # Check status
+  acpx-council status
+
+  # Execute the plan
+  acpx-council execute
+
+  # Infer roles from a task
+  acpx-council roles infer "Add PostgreSQL migration with Prisma"
+
+  # Create a custom role
+  acpx-council roles create "database-expert" "Database optimization" "PostgreSQL,Prisma"
+USAGE
+}
+
+# ─── Main ──────────────────────────────────────────────────────
+
+parse_opts "$@"
+
+case "$cmd" in
+  review)     cmd_review "$@" ;;
+  council)    cmd_council ;;
+  debate)     PROTOCOL="adversarial"; cmd_council ;;
+  synthesize) cmd_synthesize ;;
+  execute)    cmd_execute ;;
+  status)     cmd_status ;;
+  roles)      cmd_roles "$@" ;;
+  workspace)  cmd_workspace "$@" ;;
+  help|--help|-h)
+    usage ;;
+  *)
+    # Treat unknown command as a task
+    TASK="$cmd $*"
+    cmd_council
+    ;;
+esac

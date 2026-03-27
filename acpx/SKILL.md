@@ -1,6 +1,6 @@
 ---
 name: acpx
-description: Multi-agent collaboration and task delegation via the Agent Client Protocol (ACP) using acpx. Form agent teams from Claude Code, Codex, OpenCode, Gemini, Cursor, Copilot, and other ACP-compatible agents. Run parallel workstreams, switch agent modes, orchestrate deliberation and consensus, or delegate coding tasks to another agent. Triggers include "delegate to Claude", "use Claude Code", "ask Claude to", "parallel agents", "acpx", "ACP", "agent delegation", "form a team", "council", "multi-agent", "debate", "consensus", "code review team", "security audit", "have Claude/Codex/Gemini review/implement/fix", or any request involving multiple AI agents collaborating.
+description: Multi-agent collaboration and task delegation via the Agent Client Protocol (ACP) using acpx. Form agent teams from Claude Code, Codex, OpenCode, Gemini, Cursor, Copilot, OpenClaw, and other ACP-compatible agents. Run parallel workstreams, switch agent modes, orchestrate deliberation and consensus, or delegate coding tasks to another agent. Triggers include "delegate to Claude", "use Claude Code", "ask Claude to", "parallel agents", "acpx", "ACP", "agent delegation", "form a team", "council", "multi-agent", "debate", "consensus", "code review team", "security audit", "have Claude/Codex/Gemini review/implement/fix", or any request involving multiple AI agents collaborating.
 ---
 
 # acpx — Multi-Agent Collaboration via ACP
@@ -15,6 +15,43 @@ npm i -g acpx@latest
 
 Install the target agents you want to use (e.g., `npm i -g @anthropic-ai/claude-code`).
 
+## Your Role: Orchestrator
+
+When you use acpx, **you are the supervisor**. You don't implement everything yourself — you delegate. Your job is to:
+
+1. **Define the task** clearly — what needs doing, constraints, success criteria
+2. **Pick the right protocol** — fan-out for quick opinions, council for deliberation, debate for go/no-go
+3. **Assign roles** — security expert, architect, skeptic, etc. based on the task domain
+4. **Dispatch agents** — via `acpx-council` or manual `acpx` commands
+5. **Synthesize results** — read the workspace outputs, make the final call
+
+The agents are your team members. You are the tech lead directing their work.
+
+## Quick Start: One-Command Council
+
+```bash
+# Code review — auto-selects protocol, roles, and agents
+acpx-council review src/auth.ts
+
+# General council — ask anything
+acpx-council council "Should we use Redis or Memcached for session caching?"
+
+# Adversarial debate for go/no-go decisions
+acpx-council debate "Migrate from REST to tRPC?"
+
+# Security audit preset
+acpx-council council "Review login flow" --preset security_audit
+
+# Single agent (e.g., OpenCode) with 5 role-playing sessions
+acpx-council council "Refactor auth module" --single-agent opencode --sessions 5
+
+# Check results
+acpx-council status
+
+# Execute the plan
+acpx-council execute
+```
+
 ## Quick Start: Single Agent
 
 ```bash
@@ -27,7 +64,7 @@ acpx claude -s worker "analyze the auth module"
 acpx claude -s worker "now refactor it based on your analysis"
 ```
 
-## Quick Start: Multi-Agent Council
+## Quick Start: Manual Multi-Agent Council
 
 The fastest way to get multiple opinions on a task:
 
@@ -51,85 +88,325 @@ wait
 echo "=== Final Reviews ===\n\n[Claude]: $(cat /tmp/r2-claude.txt)\n\n[Codex]: $(cat /tmp/r2-codex.txt)\n\n[Gemini]: $(cat /tmp/r2-gemini.txt)"
 ```
 
+---
+
+## acpx-council CLI
+
+The `acpx-council` command provides one-line access to all protocols and presets. It manages sessions, workspace, synthesis, and cleanup automatically.
+
+### Commands
+
+```
+acpx-council <command> [options] [task]
+
+Commands:
+  review <file>        Code review with auto-assigned expert roles
+  council <task>       Run a multi-agent council with auto-selected protocol
+  debate <task>        Adversarial debate (advocate vs critic + judge)
+  synthesize           Synthesize current workspace outputs into consensus
+  execute              Execute the plan from current workspace
+  status               Show current workspace status
+  roles <subcommand>   Manage roles (list, create, infer)
+  workspace <subcmd>   Manage workspace (init, cleanup, archive, status)
+```
+
+### Options
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--protocol` | `-p` | auto | Protocol: auto\|fanout\|deliberation\|role-council\|adversarial\|pipeline |
+| `--agents` | `-a` | auto | Comma-separated agent list (e.g., `claude,codex,gemini`) |
+| `--roles` | `-r` | auto | Comma-separated role list (e.g., `security,perf,testing`) |
+| `--orchestrator` | `-o` | claude | Agent used for synthesis |
+| `--preset` | `-t` | — | Team preset (see below) |
+| `--single-agent` | `-s` | — | Use one agent client with multiple sessions |
+| `--sessions` | `-n` | 3 | Number of sessions for single-agent mode |
+| `--workspace` | `-w` | .acpx-workspace | Workspace directory |
+
+### Plan-First Workflow
+
+Every council protocol follows a two-phase flow:
+
+```
+Phase 1: PLAN (all agents in plan mode — analysis only, no code changes)
+  → Discuss approach, identify risks, form consensus
+  → Output: consensus plan document
+
+Phase 2: EXECUTE (agents switch to execution mode)
+  → Implement based on the agreed plan
+  → Cross-review results
+```
+
+Plan mode is automatically enabled for Phase 1. The council checks consensus after Round 1 — if agents already agree, it skips Round 2 and goes straight to synthesis.
+
+### Examples
+
+```bash
+# Auto everything — best for most cases
+acpx-council review src/auth.ts
+
+# Specific protocol and agents
+acpx-council council "Design caching strategy" -p role-council -a claude,codex,gemini
+
+# Custom roles for a specific domain
+acpx-council council "Add Stripe payments" -r security,payments,testing,dx
+
+# Single agent, multiple perspectives (no multi-agent setup needed)
+acpx-council council "Review API design" -s opencode -n 4
+
+# Quick fan-out opinion poll
+acpx-council council "What testing framework?" -p fanout
+
+# Full adversarial debate
+acpx-council debate "Should we use microservices?"
+```
+
+---
+
+## Shared Workspace
+
+The council uses `.acpx-workspace/` for inter-agent context sharing:
+
+```
+.acpx-workspace/
+├── context.md          # Task description, protocol, phase, round
+├── plan.md             # Consensus plan from Phase 1
+├── decisions.md        # Agreed points, divergences, action items
+├── open-questions.md   # Unresolved questions
+├── synthesis.md        # Final synthesis from all agent outputs
+└── agents/
+    ├── claude/
+    │   ├── round-1.md  # Claude's Round 1 output
+    │   ├── round-2.md  # Claude's Round 2 output
+    │   └── latest.md   # Symlink to most recent round
+    ├── codex/
+    └── gemini/
+```
+
+Each agent can read shared context and write to its own directory. The workspace enables:
+- **Agent continuity** — agents see their prior rounds via session resume
+- **Cross-agent awareness** — Round 2 gathers all outputs from the workspace
+- **Synthesis** — orchestrator reads all outputs to produce consensus
+- **Archival** — `acpx-council workspace archive` saves workspace for future reference
+
+```bash
+acpx-council status        # Show workspace phase, agents, rounds
+acpx-council workspace archive auth-review   # Save for later
+acpx-council workspace cleanup               # Remove workspace
+```
+
+---
+
+## Auto Synthesis
+
+After deliberation rounds, the orchestrator agent automatically analyzes all outputs and produces a structured synthesis:
+
+```markdown
+### CONSENSUS
+Points where ALL or MOST agents agree.
+
+### DIVERGENCES
+Points where agents disagree — with each side's position and evidence assessment.
+
+### ACTION ITEMS
+Concrete next steps.
+
+### HUMAN DECISIONS NEEDED
+Tradeoffs requiring human judgment — options and implications.
+
+### CONFIDENCE
+HIGH / MEDIUM / LOW with justification.
+
+### RECOMMENDATION
+One clear recommended path forward.
+```
+
+This replaces the manual `echo` / `cat` approach from the original protocol. The synthesis is written to `.acpx-workspace/synthesis.md`.
+
+---
+
+## Dynamic Roles
+
+### Builtin Roles (8)
+
+| Role | Focus | Use When |
+|------|-------|----------|
+| `security` | Vulnerabilities, auth, data protection | Any code handling user input, auth, PII |
+| `architect` | System design, scalability, patterns | Architecture decisions, tech debt |
+| `skeptic` | Challenge assumptions, find flaws | Go/no-go decisions, proposals |
+| `perf` | Latency, throughput, optimization | Performance-sensitive code |
+| `testing` | Coverage, edge cases, regression | Test planning, quality gates |
+| `maintainer` | Code quality, readability, long-term | PR reviews, refactoring |
+| `dx` | API ergonomics, developer workflow | API design, tooling changes |
+| `neutral` | Balanced, no specialization | General tasks |
+
+### Auto Role Inference
+
+Roles are automatically inferred from the task description:
+
+```bash
+# Auto-inferring: task mentions "Stripe payment" → roles: security, payments, testing, dx
+acpx-council council "Add Stripe payment integration"
+
+# Explicit roles override inference
+acpx-council council "Add Redis caching" -r perf,testing,architect
+```
+
+Keywords mapped to roles: `security/vulnerability/auth` → security, `performance/latency/caching` → perf, `test/coverage/regression` → testing, etc.
+
+### Custom Roles
+
+Create domain-specific roles for your project:
+
+```bash
+# Create a role
+acpx-council roles create "database-expert" "Query optimization, indexing, migration safety" "PostgreSQL,Prisma,Drizzle"
+
+# Use it in a council
+acpx-council council "Optimize slow queries" -r database-expert,perf,testing
+
+# List all available roles
+acpx-council roles list
+```
+
+Custom roles are stored in `~/.acpx/roles/` and persist across sessions.
+
+### Community Roles (Planned)
+
+```bash
+# Install from community registry (future)
+acpx-council roles install @community/stripe-expert
+acpx-council roles install @community/a11y-expert
+```
+
+---
+
+## Single-Agent Multi-Session
+
+You don't need multiple agent clients. Use `--single-agent` to create multiple sessions of the same agent, each with a different role:
+
+```bash
+# OpenCode with 5 different expert perspectives
+acpx-council council "Review the auth module" --single-agent opencode --sessions 5
+
+# Under the hood:
+#   session 1: opencode with [ROLE: Security Expert]
+#   session 2: opencode with [ROLE: Performance Expert]
+#   session 3: opencode with [ROLE: Testing Expert]
+#   session 4: opencode with [ROLE: Maintainer]
+#   session 5: opencode with [ROLE: Skeptic]
+```
+
+**When single-agent is enough**: Most code reviews, architecture discussions, and quality assessments. The role prompt is the primary quality driver, not the model identity.
+
+**When multi-agent is better**: When you need genuinely different LLM capabilities (e.g., Claude for complex reasoning + Codex for fast implementation), or when you want model-diverse perspectives to reduce single-model bias.
+
+---
+
+## Agent Profiles
+
+Each agent has a capability profile used for automatic role assignment:
+
+| Agent | Strengths | Preferred Roles |
+|-------|-----------|-----------------|
+| Claude Code | Complex reasoning, architecture, security | architect, security, maintainer, skeptic |
+| Codex | Implementation, testing, algorithmic | testing, maintainer |
+| Gemini CLI | Broad knowledge, performance, multimodal | perf, neutral, testing |
+| OpenCode | Flexibility, local-first | maintainer, testing, dx |
+| OpenClaw | Protocol-native, headless, automation | neutral (can fill any role) |
+| Cursor | IDE integration, refactoring | dx, maintainer |
+| Copilot | IDE integration, code suggestions | dx, maintainer |
+
+Profiles are defined in `config/agent-profiles.yaml` and used for automatic role assignment when `--roles auto` is set.
+
+---
+
 ## Council Protocol
 
 The standard multi-agent collaboration pipeline:
 
 ```
-ASSEMBLE → BRIEF → DELIBERATE → CONVERGE → EXECUTE → REVIEW → DELIVER
- 组建团队   分发问题   交叉讨论    形成共识    分工执行   交叉审查   交付成果
+PLAN → DELIBERATE → CONVERGE → EXECUTE → REVIEW → DELIVER
+ 规划   交叉讨论     形成共识    分工执行   交叉审查   交付成果
 ```
 
 ### Step-by-Step
 
-**1. ASSEMBLE** — Create named sessions for each agent:
+**1. PLAN** — All agents enter plan mode, analyze independently:
 
 ```bash
-acpx claude sessions new --name council-claude
-acpx codex sessions new --name council-codex
-acpx opencode sessions new --name council-opencode
+# Automatic via acpx-council — plan mode is the default first phase
+acpx-council council "Design a caching layer for our API"
 ```
 
-**2. BRIEF** — Send each agent the task with a role prefix:
+**2. DELIBERATE** — Each agent reviews all other responses and revises:
 
 ```bash
-acpx --format quiet claude -s council-claude "[ROLE: Architect] Design a caching layer for our API. Consider: invalidation strategy, TTL, cache-aside vs write-through." > /tmp/r1-claude.txt
-acpx --format quiet codex -s council-codex "[ROLE: Performance Expert] Design a caching layer for our API. Consider: invalidation strategy, TTL, cache-aside vs write-through." > /tmp/r1-codex.txt
+# Automatic Round 2 — agents see each other's analysis
+# Skipped if Round 1 consensus is HIGH
 ```
 
-**3. DELIBERATE** — Each agent reviews all other responses and revises:
+**3. CONVERGE** — Orchestrator synthesizes a consensus plan:
 
 ```bash
-ALL_RESPONSES=$(echo "[Claude]: $(cat /tmp/r1-claude.txt)\n\n[Codex]: $(cat /tmp/r1-codex.txt)")
-acpx --format quiet claude -s council-claude "Other architects said:\n$ALL_RESPONSES\n\nRevise your design. Address any concerns raised." > /tmp/r2-claude.txt
-acpx --format quiet codex -s council-codex "Other architects said:\n$ALL_RESPONSES\n\nRevise your design. Address any concerns raised." > /tmp/r2-codex.txt
+# Automatic synthesis → .acpx-workspace/synthesis.md + plan.md
 ```
 
-**4. CONVERGE** — Orchestrator synthesizes a consensus plan.
-
-**5. EXECUTE** — Delegate implementation to agents in parallel:
+**4. EXECUTE** — Delegate implementation to agents:
 
 ```bash
-acpx --approve-all claude -s exec-claude "Implement the caching layer based on this design: $(cat /tmp/consensus.txt)" &
-acpx --approve-all codex -s exec-codex "Write tests for the caching layer: $(cat /tmp/consensus.txt)" &
-wait
+acpx-council execute
+# Agents switch from plan mode to acceptEdits mode
 ```
 
-**6. REVIEW** — Cross-review implementations:
+**5. REVIEW** — Cross-review implementations.
 
-```bash
-acpx --format quiet codex -s council-codex "Review Claude's implementation for bugs and edge cases:\n$(cat /tmp/impl-claude.txt)"
-acpx --format quiet claude -s council-claude "Review Codex's tests for coverage gaps:\n$(cat /tmp/tests-codex.txt)"
-```
+**6. DELIVER** — Final output.
 
-### Quick Council Commands
+### Adaptive Protocol Selection
 
-```bash
-# Assemble a 3-agent team in one line
-acpx claude sessions new --name t1 && acpx codex sessions new --name t2 && acpx gemini sessions new --name t3
+When `--protocol auto` (default), the protocol is chosen based on task keywords:
 
-# Fire-and-forget fan-out (don't wait)
-acpx --no-wait --format quiet claude -s t1 "task..." > /tmp/r1-t1.txt
+| Task Pattern | Auto-Selected Protocol |
+|---|---|
+| "review", "audit", "assess" | role-council |
+| "should", "decide", "choose", "whether" | adversarial |
+| "implement", "build", "create" | role-council |
+| "quick", "opinion", "think" | fanout |
+| "design", "architect", "plan" | role-council |
+| "debug", "fix", "investigate" | pipeline |
 
-# Collect all Round 1 results
-cat /tmp/r1-*.txt
+### Adaptive Consensus
 
-# Cleanup after deliberation
-acpx claude sessions close t1 && acpx codex sessions close t2 && acpx gemini sessions close t3
-```
+After Round 1, the council checks agreement level:
 
-### Team Presets
+| Consensus | Action |
+|-----------|--------|
+| HIGH (>80% agreement) | Skip Round 2, synthesize immediately |
+| MEDIUM (40-80%) | Run Round 2 focused on divergent points |
+| LOW (<40%) | Run full Round 2 or upgrade to more rigorous protocol |
 
-Pre-configured role assignments for common scenarios. See `references/roles.md` for full definitions.
+---
 
-| Preset | Agents | Best For |
+## Team Presets
+
+Pre-configured role assignments for common scenarios:
+
+| Preset | Roles | Best For |
 |---|---|---|
-| `code_review` | maintainer, perf, testing, security, dx | PR reviews, quality gates |
+| `code_review` | security, perf, testing, maintainer, dx | PR reviews, quality gates |
 | `security_audit` | security, skeptic, architect, dx, testing | Security-sensitive changes |
 | `architecture_review` | architect, perf, skeptic, maintainer, testing | Design decisions, tech debt |
-| `devil_advocate` | skeptic, skeptic, architect, maintainer | Go/no-go decisions, proposals |
+| `devil_advocate` | skeptic, skeptic, architect, maintainer | Go/no-go decisions |
 | `balanced` | neutral × N | General tasks, no specialization |
 | `build_deploy` | architect, testing, maintainer | Feature implementation |
+
+```bash
+acpx-council council "Review PR #42" --preset code_review
+acpx-council council "Is this API secure?" --preset security_audit
+```
+
+---
 
 ## Supported Agents
 
@@ -139,10 +416,24 @@ Pre-configured role assignments for common scenarios. See `references/roles.md` 
 | Codex | `acpx codex` | `npm i -g @openai/codex` |
 | OpenCode | `acpx opencode` | `npm i -g opencode-ai` |
 | Gemini CLI | `acpx gemini` | `npm i -g @anthropic-ai/gemini-cli` |
+| OpenClaw | `acpx openclaw` | `npm i -g @openclaw/acpx` |
 | Cursor | `acpx cursor` | Cursor app |
 | GitHub Copilot | `acpx copilot` | `npm i -g @githubnext/github-copilot-cli` |
 | Pi | `acpx pi` | github.com/mariozechner/pi |
 | Qwen Code | `acpx qwen` | `npm i -g @qwen/qwen-code` |
+
+### OpenClaw — The Protocol Foundation
+
+[OpenClaw](https://github.com/openclaw/acpx) is the headless agent client that implements the Agent Client Protocol (ACP). It is the foundation that acpx builds on:
+
+- **ACP Protocol**: OpenClaw provides the standardized protocol for agent-to-agent communication
+- **Headless Mode**: Run agents without interactive UI — essential for automation and CI
+- **Session Management**: Persistent sessions, mode switching, and lifecycle control
+- **Multi-Agent Orchestration**: The underlying infrastructure for acpx's council protocols
+
+If you want to build custom agent integrations or understand how acpx works internally, explore the [OpenClaw repository](https://github.com/openclaw/acpx).
+
+---
 
 ## Agent Mode Switching
 
@@ -150,9 +441,9 @@ Set working modes (Claude Code example; other agents may vary):
 
 | Mode | Behavior | Use When |
 |---|---|---|
-| `plan` | Plan only, no execution | Architecture, analysis |
+| `plan` | Plan only, no execution | Architecture, analysis (Phase 1 default) |
 | `default` | Ask before changes | Standard work |
-| `acceptEdits` | Auto-accept edits | Trusted refactoring |
+| `acceptEdits` | Auto-accept edits | Trusted refactoring (Phase 2 default) |
 | `dontAsk` | Auto-accept everything | Batch tasks |
 | `bypassPermissions` | Skip all checks | CI/automation |
 
@@ -207,10 +498,19 @@ acpx opencode -s helper "analyze test results"
 acpx codex -s coder "implement X" && acpx gemini -s reviewer "review: $(cat result.txt)"
 ```
 
+---
+
 ## Reference Files
 
-- **`references/roles.md`** — All 8 role definitions (security, architect, skeptic, perf, testing, maintainer, dx, neutral) with prompt prefixes for Round 1 and Round 2, plus team presets with agent-to-role mappings.
-- **`references/protocols.md`** — 7 collaboration patterns (fan-out, deliberation, role council, adversarial debate, sequential pipeline, DOVA hybrid, DCI structured) with acpx command examples, decision matrix, and cost estimates.
+- **`references/roles.md`** — All 8 builtin role definitions with Round 1 and Round 2 prompt prefixes, plus team presets with agent-to-role mappings.
+- **`references/protocols.md`** — 7 collaboration patterns with decision matrix and cost estimates.
+- **`config/agent-profiles.yaml`** — Agent capability definitions for automatic role assignment.
+- **`config/role-templates/`** — Custom role templates directory.
+- **`lib/workspace.sh`** — Shared workspace management (init, read, write, archive).
+- **`lib/synthesize.sh`** — Auto consensus detection and structured synthesis.
+- **`lib/roles.sh`** — Dynamic role management (builtin, custom, auto-inference).
+- **`lib/protocols.sh`** — Protocol implementations with plan-first flow.
+- **`bin/acpx-council`** — High-level CLI for one-command council invocation.
 
 ## Gotchas
 
@@ -221,3 +521,6 @@ acpx codex -s coder "implement X" && acpx gemini -s reviewer "review: $(cat resu
 - **`--format quiet` is essential for piping**: Returns only final text, no tool calls or thinking
 - **2 rounds is optimal**: Research shows diminishing returns beyond 2 deliberation rounds
 - **Session resume preserves context**: Use the same `-s name` across rounds for continuity
+- **Plan mode first**: `acpx-council` always starts in plan mode — agents analyze before executing
+- **Single-agent works**: Use `--single-agent` when you only have one agent client installed
+- **Workspace is per-directory**: `.acpx-workspace/` is created in the current directory

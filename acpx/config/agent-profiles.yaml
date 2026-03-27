@@ -1,0 +1,245 @@
+# Agent Client Profiles — capability definitions for acpx council
+# Used for automatic role assignment and single-agent multi-session support
+
+agents:
+  claude:
+    command: "acpx claude"
+    install: "npm i -g @anthropic-ai/claude-code"
+    supports_plan_mode: true
+    supports_sessions: true
+    strengths:
+      - complex-reasoning
+      - architecture
+      - security
+      - code-quality
+      - debugging
+      - long-context
+    weaknesses:
+      - speed  # slower but more thorough
+    preferred_roles:
+      - architect
+      - security
+      - maintainer
+      - skeptic
+    notes: "Best for complex reasoning, security analysis, and code quality assessment."
+
+  codex:
+    command: "acpx codex"
+    install: "npm i -g @openai/codex"
+    supports_plan_mode: true
+    supports_sessions: true
+    strengths:
+      - implementation
+      - testing
+      - algorithmic-analysis
+      - rapid-prototyping
+    weaknesses:
+      - complex-reasoning
+      - long-context
+    preferred_roles:
+      - perf
+      - testing
+      - maintainer
+    notes: "Strong at implementation and testing tasks."
+
+  gemini:
+    command: "acpx gemini"
+    install: "npm i -g @anthropic-ai/gemini-cli"
+    supports_plan_mode: true
+    supports_sessions: true
+    strengths:
+      - broad-knowledge
+      - performance
+      - multimodal
+      - long-context
+    weaknesses:
+      - domain-specific-depth
+    preferred_roles:
+      - perf
+      - neutral
+      - testing
+    notes: "Good broad perspective and performance analysis."
+
+  opencode:
+    command: "acpx opencode"
+    install: "npm i -g opencode-ai"
+    supports_plan_mode: true
+    supports_sessions: true
+    strengths:
+      - implementation
+      - flexibility
+      - local-first
+    weaknesses:
+      - cloud-scale-reasoning
+    preferred_roles:
+      - maintainer
+      - testing
+      - dx
+    notes: "Flexible local agent, good for implementation and DX."
+
+  openclaw:
+    command: "acpx openclaw"
+    install: "npm i -g @openclaw/acpx"
+    supports_plan_mode: true
+    supports_sessions: true
+    strengths:
+      - protocol-native
+      - headless
+      - automation
+      - multi-agent-orchestration
+    weaknesses:
+      - interactive
+    preferred_roles:
+      - neutral
+      - any  # OpenClaw is the protocol layer itself
+    notes: "The ACP protocol implementation. Headless agent client that powers acpx under the hood. Can act as any role since it's protocol-native."
+
+  cursor:
+    command: "acpx cursor"
+    install: "Cursor app required"
+    supports_plan_mode: false
+    supports_sessions: false
+    strengths:
+      - ide-integration
+      - code-completion
+      - refactoring
+    weaknesses:
+      - headless-mode
+      - session-management
+    preferred_roles:
+      - dx
+      - maintainer
+    notes: "IDE-native, limited CLI support."
+
+  copilot:
+    command: "acpx copilot"
+    install: "npm i -g @githubnext/github-copilot-cli"
+    supports_plan_mode: false
+    supports_sessions: false
+    strengths:
+      - ide-integration
+      - code-suggestions
+    weaknesses:
+      - headless-mode
+      - complex-reasoning
+    preferred_roles:
+      - dx
+      - maintainer
+    notes: "IDE-native, limited CLI support."
+
+  pi:
+    command: "acpx pi"
+    install: "github.com/mariozechner/pi"
+    supports_plan_mode: false
+    supports_sessions: true
+    strengths:
+      - lightweight
+      - fast
+    weaknesses:
+      - complex-reasoning
+    preferred_roles:
+      - neutral
+    notes: "Lightweight agent."
+
+  qwen:
+    command: "acpx qwen"
+    install: "npm i -g @qwen/qwen-code"
+    supports_plan_mode: true
+    supports_sessions: true
+    strengths:
+      - multilingual
+      - implementation
+    weaknesses:
+      - english-heavy-contexts
+    preferred_roles:
+      - maintainer
+      - testing
+    notes: "Strong multilingual support."
+
+# Role-to-task mapping for auto role inference
+role_inference:
+  keywords:
+    security:
+      - "security"
+      - "vulnerability"
+      - "auth"
+      - "authentication"
+      - "authorization"
+      - "XSS"
+      - "SQL injection"
+      - "OWASP"
+      - "encryption"
+      - "token"
+    architect:
+      - "architecture"
+      - "design"
+      - "system design"
+      - "scalability"
+      - "migration"
+      - "refactor"
+      - "microservice"
+      - "monorepo"
+    perf:
+      - "performance"
+      - "latency"
+      - "throughput"
+      - "optimization"
+      - "bottleneck"
+      - "caching"
+      - "memory"
+      - "slow"
+    testing:
+      - "test"
+      - "coverage"
+      - "edge case"
+      - "regression"
+      - "integration test"
+      - "unit test"
+      - "e2e"
+    database:
+      - "database"
+      - "SQL"
+      - "query"
+      - "index"
+      - "migration"
+      - "schema"
+      - "PostgreSQL"
+      - "Redis"
+      - "MongoDB"
+      - "Prisma"
+      - "Drizzle"
+    frontend:
+      - "UI"
+      - "frontend"
+      - "React"
+      - "Next.js"
+      - "CSS"
+      - "component"
+      - "accessibility"
+      - "a11y"
+    payments:
+      - "payment"
+      - "Stripe"
+      - "billing"
+      - "checkout"
+      - "subscription"
+    devops:
+      - "deploy"
+      - "CI/CD"
+      - "Docker"
+      - "Kubernetes"
+      - "infrastructure"
+      - "pipeline"
+    dx:
+      - "developer experience"
+      - "DX"
+      - "API design"
+      - "ergonomics"
+      - "error message"
+      - "usability"
+    i18n:
+      - "internationalization"
+      - "i18n"
+      - "localization"
+      - "locale"
+      - "translation"
