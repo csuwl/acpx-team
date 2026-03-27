@@ -1,7 +1,7 @@
 {
   "name": "acpx-skill",
   "version": "0.2.0",
-  "description": "Multi-agent collaboration skill for Claude Code — orchestrate AI agent teams via ACP with structured protocols, role-specialized councils, and plan-first workflows",
+  "description": "Multi-agent collaboration skill — orchestrate AI agent teams via ACP with structured protocols, role-specialized councils, and plan-first workflows. Works with any ACP-compatible agent: Claude Code, Codex, OpenCode, Gemini, Cursor, Copilot, OpenClaw, and more.",
   "keywords": [
     "claude-code",
     "skill",
