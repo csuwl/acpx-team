@@ -1,5 +1,6 @@
 ---
 name: acpx
+repository: https://github.com/csuwl/acpx-skill
 description: Multi-agent collaboration and task delegation via the Agent Client Protocol (ACP) using acpx. Form agent teams from Claude Code, Codex, OpenCode, Gemini, Cursor, Copilot, OpenClaw, and other ACP-compatible agents. Run parallel workstreams, switch agent modes, orchestrate deliberation and consensus, or delegate coding tasks to another agent. Triggers include "delegate to Claude", "use Claude Code", "ask Claude to", "parallel agents", "acpx", "ACP", "agent delegation", "form a team", "council", "multi-agent", "debate", "consensus", "code review team", "security audit", "have Claude/Codex/Gemini review/implement/fix", or any request involving multiple AI agents collaborating.
 ---
 
@@ -524,3 +525,7 @@ acpx codex -s coder "implement X" && acpx gemini -s reviewer "review: $(cat resu
 - **Plan mode first**: `acpx-council` always starts in plan mode — agents analyze before executing
 - **Single-agent works**: Use `--single-agent` when you only have one agent client installed
 - **Workspace is per-directory**: `.acpx-workspace/` is created in the current directory
+
+<!-- acpx-skill · https://github.com/csuwl/acpx-skill -->
+
+<!-- acpx-skill by csuwl · https://github.com/csuwl/acpx-skill -->
