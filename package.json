@@ -17,10 +17,11 @@
     "openclaw"
   ],
   "bin": {
-    "acpx-council": "./acpx/bin/acpx-council"
+    "acpx-council": "./acpx-council.js"
   },
   "files": [
-    "acpx/"
+    "acpx/",
+    "acpx-council.js"
   ],
   "scripts": {
     "test": "bash -n acpx/bin/acpx-council && bash -n acpx/lib/*.sh && echo 'All scripts pass syntax check'",
@@ -38,7 +39,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/csuwl/acpx-skill"
+    "url": "git+https://github.com/csuwl/acpx-skill.git"
   },
   "engines": {
     "node": ">=18"

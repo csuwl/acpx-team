@@ -16,6 +16,21 @@ npm i -g acpx@latest
 
 Install the target agents you want to use (e.g., `npm i -g @anthropic-ai/claude-code`).
 
+## Installation
+
+```bash
+# Option 1: npm (recommended — gives you the acpx-council CLI globally)
+npm i -g acpx-skill
+
+# Option 2: git clone into your global skills directory
+git clone https://github.com/csuwl/acpx-skill.git ~/.claude/skills/acpx
+
+# Option 3: git clone into a specific project
+git clone https://github.com/csuwl/acpx-skill.git .claude/skills/acpx
+```
+
+After `npm i -g`, the `acpx-council` command is available everywhere.
+
 ## Your Role: Orchestrator
 
 When you use acpx, **you are the supervisor**. You don't implement everything yourself — you delegate. Your job is to:
