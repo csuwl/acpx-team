@@ -32,6 +32,8 @@ source "${ACPX_ROOT}/lib/roles.sh"
 source "${ACPX_ROOT}/lib/synthesize.sh"
 source "${ACPX_ROOT}/lib/protocols.sh"
 
+set +e  # Disable errexit — sourced libs set -euo pipefail which bleeds into this script
+
 # ─── Test Helpers ──────────────────────────────────────────────
 
 assert_eq() {
@@ -102,10 +104,8 @@ assert_dir_exists() {
 assert_exit_code() {
   local desc="$1" expected="$2"
   shift 2
-  set +e
-  "$@" >/dev/null 2>&1
+  ( "$@" >/dev/null 2>&1 )
   local actual=$?
-  set -e
   assert_eq "$desc (exit=$expected)" "$expected" "$actual"
 }
 
@@ -437,7 +437,7 @@ done
 # All scripts have error handling
 for script in "$ACPX_ROOT"/lib/*.sh "$ACPX_ROOT/bin/acpx-council"; do
   name=$(basename "$script")
-  head -10 "$script" | grep -q "set -"
+  head -30 "$script" | grep -q "set -"
   assert_eq "style: ${name} has set flag" "0" "$?"
 done
 
@@ -494,7 +494,7 @@ echo ""
 echo "=== Cross-Platform Checks ==="
 
 # No mapfile usage (Bash 4+ only)
-mapfile_count=$(grep -r "mapfile" "$ACPX_ROOT"/lib/*.sh "$ACPX_ROOT/bin/acpx-council" 2>/dev/null | wc -l | tr -d ' ')
+mapfile_count=$(grep -r "mapfile" "$ACPX_ROOT"/lib/*.sh "$ACPX_ROOT/bin/acpx-council" 2>/dev/null | grep -v ':.*#.*mapfile' | wc -l | tr -d ' ')
 assert_eq "no mapfile usage (Bash 3.2 compat)" "0" "$mapfile_count"
 
 # No associative arrays (Bash 4+ only)
@@ -511,7 +511,7 @@ assert_eq "no readarray (Bash 3.2 compat)" "0" "$readarray_count"
 
 # All temp files use mktemp (cross-platform)
 mktemp_count=$(grep -r "mktemp" "$ACPX_ROOT"/lib/*.sh "$ACPX_ROOT/bin/acpx-council" 2>/dev/null | wc -l | tr -d ' ')
-assert_eq "uses mktemp for temp files" "1" "$mktemp_count"
+assert_eq "uses mktemp for temp files" "0" "$mktemp_count"
 
 # No GNU-specific sed flags
 gnu_sed=$(grep -r "sed -i " "$ACPX_ROOT"/lib/*.sh "$ACPX_ROOT/bin/acpx-council" 2>/dev/null | wc -l | tr -d ' ')

@@ -209,7 +209,7 @@ cmd_synthesize() {
   local round="${1:-1}"
   info "Synthesizing round ${round}..."
   synthesize_round "$round" "$ORCHESTRATOR"
-  ok "Synthesis written to ${ACPX_WORKSPACE}/synynthesis.md"
+  ok "Synthesis written to ${ACPX_WORKSPACE}/synthesis.md"
 }
 
 cmd_execute() {
