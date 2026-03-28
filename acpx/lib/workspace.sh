@@ -6,6 +6,16 @@ set -euo pipefail
 
 ACPX_WORKSPACE="${ACPX_WORKSPACE:-.acpx-workspace}"
 
+# ─── Helpers ────────────────────────────────────────────────────
+
+# Atomic in-place sed with guaranteed .bak cleanup (BSD+GNU compatible)
+_safe_sed_inplace() {
+  local pattern="$1"
+  local file="$2"
+  sed -i.bak "$pattern" "$file"
+  rm -f "${file}.bak"
+}
+
 # ─── Core Functions ────────────────────────────────────────────
 
 workspace_init() {
@@ -66,8 +76,7 @@ workspace_set_phase() {
     echo "Error: workspace not initialized. Run workspace_init first." >&2
     return 1
   fi
-  sed -i.bak "s/Phase: .*/Phase: ${phase}/" "$ACPX_WORKSPACE/context.md"
-  rm -f "$ACPX_WORKSPACE/context.md.bak"
+  _safe_sed_inplace "s/Phase: .*/Phase: ${phase}/" "$ACPX_WORKSPACE/context.md"
 }
 
 workspace_set_round() {
@@ -81,8 +90,7 @@ workspace_set_round() {
     echo "Error: workspace not initialized." >&2
     return 1
   fi
-  sed -i.bak "s/Round: .*/Round: ${round}/" "$ACPX_WORKSPACE/context.md"
-  rm -f "$ACPX_WORKSPACE/context.md.bak"
+  _safe_sed_inplace "s/Round: .*/Round: ${round}/" "$ACPX_WORKSPACE/context.md"
 }
 
 # ─── Context ───────────────────────────────────────────────────
@@ -170,12 +178,10 @@ workspace_add_decision() {
 
   # Replace the _(none yet)_ or append after the section
   if grep -q "_(none yet)_" "$file" 2>/dev/null; then
-    sed -i.bak "/${marker}/,+1 s/_(none yet)_/- ${escaped_text}/" "$file"
-    rm -f "$file.bak"
+    _safe_sed_inplace "/${marker}/,+1 s/_(none yet)_/- ${escaped_text}/" "$file"
   else
     # Insert after the section header
-    sed -i.bak "/${marker}/a\\- ${escaped_text}" "$file"
-    rm -f "$file.bak"
+    _safe_sed_inplace "/${marker}/a\\- ${escaped_text}" "$file"
   fi
 }
 
@@ -231,7 +237,7 @@ workspace_gather_round() {
     agent_name=$(basename "$agent_dir")
     local file="${agent_dir}round-${round}.md"
     if [[ -f "$file" ]]; then
-      result="${result}---\n## ${agent_name}\n\n$(cat "$file")\n\n"
+      result="${result}---"$'\n'"## ${agent_name}"$'\n\n'"$(cat "$file")"$'\n\n'
     fi
   done
 

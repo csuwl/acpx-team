@@ -108,7 +108,7 @@ consensus_check() {
     agent_name=$(basename "$agent_dir")
     local file="${agent_dir}round-${round}.md"
     if [[ -f "$file" ]]; then
-      all_outputs="${all_outputs}[${agent_name}]: $(head -100 "$file")"$'\n\n'
+      all_outputs="${all_outputs}[${agent_name}]: $(head -500 "$file")"$'\n\n'
     fi
   done
 

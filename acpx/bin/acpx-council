@@ -166,6 +166,11 @@ cmd_council_impl() {
       agent_list+=("${SINGLE_AGENT}")
     done
     AGENTS=$(IFS=,; echo "${agent_list[*]}")
+    # Auto-set orchestrator to match single agent when not explicitly set
+    if [[ "$ORCHESTRATOR" == "claude" ]]; then
+      ORCHESTRATOR="$SINGLE_AGENT"
+      info "Auto-set orchestrator to ${ORCHESTRATOR}"
+    fi
   fi
 
   # Handle presets — map preset to roles

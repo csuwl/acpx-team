@@ -28,10 +28,17 @@ read_into_array() {
 _detect_available_agents() {
   local found=""
   for cmd in claude codex gemini opencode cursor copilot pi qwen openclaw; do
-    if command -v "acpx-${cmd}" &>/dev/null || acpx "${cmd}" exec "echo ok" &>/dev/null; then
+    if command -v "acpx-${cmd}" &>/dev/null; then
       found="${found}${cmd}"$'\n'
     fi
   done
+  # If acpx is installed but no acpx-<cmd> wrappers found,
+  # return common agents — actual availability verified at runtime by sessions new
+  if [[ -z "$found" ]] && command -v acpx &>/dev/null; then
+    for cmd in claude codex gemini opencode; do
+      found="${found}${cmd}"$'\n'
+    done
+  fi
   printf '%s' "$found"
 }
 
@@ -181,7 +188,7 @@ protocol_deliberation() {
   local all_r1
   all_r1=$(workspace_gather_round 1)
 
-  pids=()
+  local -a pid_specs=()
   for agent in "${agents[@]}"; do
     local session="delib-${agent}"
     local r2_prompt="[Round 2: Deliberation]
@@ -192,9 +199,9 @@ ${all_r1}"
 
     _run_agent_plan "$agent" "$session" "$r2_prompt" \
       | workspace_write_agent_output "$agent" 2 &
-    pids+=($!)
+    pid_specs+=("$!:${agent}")
   done
-  for pid in "${pids[@]}"; do wait "$pid" 2>/dev/null || true; done
+  _wait_agents "${pid_specs[@]}" || true
 
   # ── Synthesize ──
   echo "==> Synthesizing..."
@@ -338,6 +345,12 @@ protocol_adversarial() {
   local critic="${agents[1]:-codex}"
   local judge="${agents[2]:-$orchestrator}"
 
+  # Unique session suffix to avoid collisions when running multiple adversarial debates
+  local adv_suffix="${RANDOM}${RANDOM}"
+  local s_advocate="adv-${adv_suffix}-bull"
+  local s_critic="adv-${adv_suffix}-bear"
+  local s_judge="adv-${adv_suffix}-judge"
+
   workspace_init "$task" "adversarial"
   workspace_set_phase "plan"
   workspace_set_round 1
@@ -345,18 +358,18 @@ protocol_adversarial() {
   echo "==> Protocol 4: Adversarial Debate"
   echo "    Advocate: ${advocate} | Critic: ${critic} | Judge: ${judge}"
 
-  acpx "$advocate" sessions new --name "bull" 2>/dev/null || true
-  acpx "$critic" sessions new --name "bear" 2>/dev/null || true
-  acpx "$judge" sessions new --name "judge" 2>/dev/null || true
+  acpx "$advocate" sessions new --name "$s_advocate" 2>/dev/null || true
+  acpx "$critic" sessions new --name "$s_critic" 2>/dev/null || true
+  acpx "$judge" sessions new --name "$s_judge" 2>/dev/null || true
 
   # Round 1: Opening arguments
   echo "==> Opening arguments..."
 
-  _run_agent_plan "$advocate" "bull" "Argue FOR the following proposal. Provide specific technical benefits and evidence.
+  _run_agent_plan "$advocate" "$s_advocate" "Argue FOR the following proposal. Provide specific technical benefits and evidence.
 ${task}" | workspace_write_agent_output "advocate" 1 &
   local pid1=$!
 
-  _run_agent_plan "$critic" "bear" "Argue AGAINST the following proposal. Provide specific technical risks and counter-evidence.
+  _run_agent_plan "$critic" "$s_critic" "Argue AGAINST the following proposal. Provide specific technical risks and counter-evidence.
 ${task}" | workspace_write_agent_output "critic" 1 &
   local pid2=$!
 
@@ -366,17 +379,27 @@ ${task}" | workspace_write_agent_output "critic" 1 &
   workspace_set_round 2
   echo "==> Cross-arguments..."
 
-  local bull_r1 critic_r1
-  bull_r1=$(workspace_read_agent_output "advocate" 1)
-  critic_r1=$(workspace_read_agent_output "critic" 1)
+  # Check if Round 1 outputs exist before reading
+  local advocate_r1_file="$ACPX_WORKSPACE/agents/advocate/round-1.md"
+  local critic_r1_file="$ACPX_WORKSPACE/agents/critic/round-1.md"
+  if [[ ! -f "$advocate_r1_file" ]]; then
+    echo "==> WARNING: advocate round-1 output missing, debate may be incomplete" >&2
+  fi
+  if [[ ! -f "$critic_r1_file" ]]; then
+    echo "==> WARNING: critic round-1 output missing, debate may be incomplete" >&2
+  fi
 
-  _run_agent_plan "$advocate" "bull" "The critic argues:
+  local bull_r1 critic_r1
+  bull_r1=$(workspace_read_agent_output "advocate" 1 2>/dev/null || echo "(no advocate output)")
+  critic_r1=$(workspace_read_agent_output "critic" 1 2>/dev/null || echo "(no critic output)")
+
+  _run_agent_plan "$advocate" "$s_advocate" "The critic argues:
 ${critic_r1}
 
 Counter-argue. Address each concern specifically." | workspace_write_agent_output "advocate" 2 &
   pid1=$!
 
-  _run_agent_plan "$critic" "bear" "The advocate argues:
+  _run_agent_plan "$critic" "$s_critic" "The advocate argues:
 ${bull_r1}
 
 Counter-argue. Address each claim specifically." | workspace_write_agent_output "critic" 2 &
@@ -387,11 +410,21 @@ Counter-argue. Address each claim specifically." | workspace_write_agent_output 
   # Judge synthesis
   echo "==> Judge synthesizing..."
 
-  local bull_r2 critic_r2
-  bull_r2=$(workspace_read_agent_output "advocate" 2)
-  critic_r2=$(workspace_read_agent_output "critic" 2)
+  # Check if Round 2 outputs exist
+  local advocate_r2_file="$ACPX_WORKSPACE/agents/advocate/round-2.md"
+  local critic_r2_file="$ACPX_WORKSPACE/agents/critic/round-2.md"
+  if [[ ! -f "$advocate_r2_file" ]]; then
+    echo "==> WARNING: advocate round-2 output missing" >&2
+  fi
+  if [[ ! -f "$critic_r2_file" ]]; then
+    echo "==> WARNING: critic round-2 output missing" >&2
+  fi
 
-  acpx --format quiet "$judge" -s judge "You are the judge. Synthesize this debate into a final recommendation.
+  local bull_r2 critic_r2
+  bull_r2=$(workspace_read_agent_output "advocate" 2 2>/dev/null || echo "(no advocate output)")
+  critic_r2=$(workspace_read_agent_output "critic" 2 2>/dev/null || echo "(no critic output)")
+
+  acpx --format quiet "$judge" -s "$s_judge" "You are the judge. Synthesize this debate into a final recommendation.
 
 [FOR]:
 ${bull_r2}
@@ -406,15 +439,20 @@ Provide:
 4. Your final recommendation with confidence level (HIGH/MEDIUM/LOW)" \
     | workspace_write_agent_output "judge" 1
 
-  cp "$ACPX_WORKSPACE/agents/judge/round-1.md" "$ACPX_WORKSPACE/synthesis.md"
+  local judge_file="$ACPX_WORKSPACE/agents/judge/round-1.md"
+  if [[ -f "$judge_file" ]]; then
+    cp "$judge_file" "$ACPX_WORKSPACE/synthesis.md"
+  else
+    echo "==> WARNING: judge output missing, synthesis.md not created" >&2
+  fi
 
   synthesize_plan "$orchestrator"
   workspace_set_phase "execute"
   echo "==> Debate complete. See $ACPX_WORKSPACE/synthesis.md"
 
-  acpx "$advocate" sessions close "bull" 2>/dev/null || true
-  acpx "$critic" sessions close "bear" 2>/dev/null || true
-  acpx "$judge" sessions close "judge" 2>/dev/null || true
+  acpx "$advocate" sessions close "$s_advocate" 2>/dev/null || true
+  acpx "$critic" sessions close "$s_critic" 2>/dev/null || true
+  acpx "$judge" sessions close "$s_judge" 2>/dev/null || true
 }
 
 # ─── Protocol 5: Sequential Pipeline ───────────────────────────
