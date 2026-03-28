@@ -227,8 +227,11 @@ role_list() {
     local found=0
     for f in "$CUSTOM_ROLES_DIR"/*.md; do
       [[ -f "$f" ]] || continue
+      local name
+      name=$(basename "$f" .md)
+      [[ "$name" == *"-deliberation" ]] && continue
       found=1
-      echo "  $(basename "$f" .md)"
+      echo "  ${name}"
     done
     if [[ "$found" -eq 0 ]]; then
       echo "  (none — create with: acpx-council roles create <name>)"
