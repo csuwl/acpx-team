@@ -431,7 +431,7 @@ acpx-council council "Is this API secure?" --preset security_audit
 | Claude Code | `acpx claude` | `npm i -g @anthropic-ai/claude-code` |
 | Codex | `acpx codex` | `npm i -g @openai/codex` |
 | OpenCode | `acpx opencode` | `npm i -g opencode-ai` |
-| Gemini CLI | `acpx gemini` | `npm i -g @anthropic-ai/gemini-cli` |
+| Gemini CLI | `acpx gemini` | `npm i -g @google/gemini-cli` |
 | OpenClaw | `acpx openclaw` | `npm i -g @openclaw/acpx` |
 | Cursor | `acpx cursor` | Cursor app |
 | GitHub Copilot | `acpx copilot` | `npm i -g @githubnext/github-copilot-cli` |

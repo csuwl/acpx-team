@@ -99,7 +99,7 @@ parse_opts() {
 # ─── Commands ──────────────────────────────────────────────────
 
 cmd_review() {
-  local target="${FILE:-$1}"
+  local target="${FILE:-${1:-}}"
   if [[ ! -f "$target" ]]; then
     err "File not found: $target"
     exit 1

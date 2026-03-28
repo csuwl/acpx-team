@@ -154,13 +154,17 @@ workspace_add_decision() {
     *)          echo "Error: category must be agreed|divergent|action" >&2; return 1 ;;
   esac
 
+  # Escape sed special characters in text
+  local escaped_text
+  escaped_text=$(printf '%s' "$text" | sed 's/[&/\]/\\&/g')
+
   # Replace the _(none yet)_ or append after the section
   if grep -q "_((none yet))_" "$file" 2>/dev/null || grep -q "_(none yet)_" "$file" 2>/dev/null; then
-    sed -i.bak "/${marker}/,+1 s/_(none yet)_/- ${text}/" "$file"
+    sed -i.bak "/${marker}/,+1 s/_(none yet)_/- ${escaped_text}/" "$file"
     rm -f "$file.bak"
   else
     # Insert after the section header
-    sed -i.bak "/${marker}/a\\- ${text}" "$file"
+    sed -i.bak "/${marker}/a\\- ${escaped_text}" "$file"
     rm -f "$file.bak"
   fi
 }

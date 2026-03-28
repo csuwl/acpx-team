@@ -189,12 +189,12 @@ role_get_r2() {
     "_role_r2_${role}"
     return
   fi
-  if [[ -f "$CUSTOM_ROLES_DIR/${role}-deliberation.md" ]]; then
-    cat "$CUSTOM_ROLES_DIR/${role}-deliberation.md"
-    return
-  fi
   if [[ -f "$ROLE_TEMPLATES_DIR/${role}-deliberation.md" ]]; then
     cat "$ROLE_TEMPLATES_DIR/${role}-deliberation.md"
+    return
+  fi
+  if [[ -f "$CUSTOM_ROLES_DIR/${role}-deliberation.md" ]]; then
+    cat "$CUSTOM_ROLES_DIR/${role}-deliberation.md"
     return
   fi
   _role_r2_neutral

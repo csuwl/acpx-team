@@ -86,7 +86,7 @@ Options:
 | Claude Code | `npm i -g @anthropic-ai/claude-code` |
 | Codex | `npm i -g @openai/codex` |
 | OpenCode | `npm i -g opencode-ai` |
-| Gemini CLI | `npm i -g @anthropic-ai/gemini-cli` |
+| Gemini CLI | `npm i -g @google/gemini-cli` |
 | OpenClaw | `npm i -g @openclaw/acpx` |
 | Cursor | Cursor app |
 | GitHub Copilot | `npm i -g @githubnext/github-copilot-cli` |

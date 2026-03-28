@@ -44,7 +44,7 @@ agents:
 
   gemini:
     command: "acpx gemini"
-    install: "npm i -g @anthropic-ai/gemini-cli"
+    install: "npm i -g @google/gemini-cli"
     supports_plan_mode: true
     supports_sessions: true
     strengths:
