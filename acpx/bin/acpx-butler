@@ -1,0 +1,357 @@
+#!/usr/bin/env bash
+# acpx-butler — Task orchestration CLI for acpx
+# Manages task boards, workflows, scheduling, and agent supervision
+#
+# Usage:
+#   acpx-butler board init                        Initialize task board
+#   acpx-butler board add --title "task" ...      Add a task
+#   acpx-butler board list [--status X] [--tag X] View tasks
+#   acpx-butler board show <id>                   Show task details
+#   acpx-butler board move <id> <status>          Change task status
+#   acpx-butler do <id>                           Execute a single task
+#   acpx-butler run [--limit N]                   Run all pending tasks
+#   acpx-butler health                            Check board health
+#   acpx-butler report                            Progress report
+#   acpx-butler workflow run <name>               Run a workflow
+#   acpx-butler workflow list                     List workflows
+#   acpx-butler daemon [--interval 60]            Background daemon
+
+set -euo pipefail
+
+ACPX_ROOT="${ACPX_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+BUTLER_ROOT="${BUTLER_ROOT:-.butler}"
+
+# Source libraries
+source "${ACPX_ROOT}/lib/board.sh"
+source "${ACPX_ROOT}/lib/monitor.sh"
+
+# ─── Color Output ──────────────────────────────────────────────
+
+B_RED='\033[0;31m'
+B_GREEN='\033[0;32m'
+B_YELLOW='\033[1;33m'
+B_BLUE='\033[0;34m'
+B_CYAN='\033[0;36m'
+B_NC='\033[0m'
+
+b_info()  { echo -e "${B_CYAN}[butler]${B_NC} $*"; }
+b_ok()    { echo -e "${B_GREEN}[ok]${B_NC} $*"; }
+b_warn()  { echo -e "${B_YELLOW}[!]${B_NC} $*"; }
+b_err()   { echo -e "${B_RED}[x]${B_NC} $*" >&2; }
+
+# ─── Commands ──────────────────────────────────────────────────
+
+cmd_board() {
+  local subcmd="${1:-list}"
+  shift || true
+
+  case "$subcmd" in
+    init)
+      board_init
+      ;;
+    add)
+      board_add "$@"
+      ;;
+    list|ls)
+      board_list "$@"
+      ;;
+    show|get)
+      local id="${1:?Usage: acpx-butler board show <id>}"
+      board_show "$id"
+      ;;
+    move|mv)
+      local id="${1:?Usage: acpx-butler board move <id> <status>}"
+      local status="${2:?Usage: acpx-butler board move <id> <status>}"
+      board_move "$id" "$status"
+      ;;
+    next)
+      local next_id
+      next_id=$(board_next)
+      if [[ -n "$next_id" ]]; then
+        echo "$next_id"
+      else
+        b_info "No executable tasks available"
+      fi
+      ;;
+    stats)
+      board_stats
+      ;;
+    archive)
+      local days="${1:-7}"
+      board_archive "$days"
+      ;;
+    retry)
+      local id="${1:?Usage: acpx-butler board retry <id>}"
+      board_retry "$id"
+      ;;
+    unblock)
+      board_unblock
+      ;;
+    cleanup)
+      local confirmed="${1:-}"
+      if [[ "$confirmed" != "--yes" ]]; then
+        b_warn "This will remove the entire board. Use --yes to confirm."
+        return 1
+      fi
+      rm -rf "${BUTLER_ROOT}"
+      b_ok "Board cleaned up"
+      ;;
+    *)
+      b_err "Unknown board subcommand: ${subcmd}"
+      echo "Available: init, add, list, show, move, next, stats, archive, retry, unblock, cleanup"
+      return 1
+      ;;
+  esac
+}
+
+cmd_do_task() {
+  local id="${1:?Usage: acpx-butler do <task-id>}"
+  monitor_exec "$id"
+}
+
+cmd_run() {
+  monitor_loop "$@"
+}
+
+cmd_health() {
+  monitor_health
+}
+
+cmd_report() {
+  [[ -d "$BUTLER_ROOT" ]] || { b_err "Butler not initialized. Run 'acpx-butler board init' first."; return 1; }
+
+  local period="${1:-today}"
+
+  case "$period" in
+    today)
+      echo "=== Butler Daily Report ==="
+      echo "Date: $(date +"%Y-%m-%d %H:%M")"
+      ;;
+    weekly|week)
+      local since_date
+      since_date=$(date -v-7d +"%Y-%m-%d" 2>/dev/null || date -d "7 days ago" +"%Y-%m-%d" 2>/dev/null || date +"%Y-%m-%d")
+      echo "=== Butler Weekly Report ==="
+      echo "Since: ${since_date}"
+      ;;
+    *)
+      echo "=== Butler Report ==="
+      ;;
+  esac
+
+  echo ""
+  echo "--- Board Status ---"
+  board_stats
+  echo ""
+
+  # Completed tasks
+  if [[ -d "${BUTLER_ROOT}/board/done" ]] && [[ "$(_count_md "${BUTLER_ROOT}/board/done")" -gt 0 ]]; then
+    echo "--- Completed ---"
+    board_list --status done --format short 2>/dev/null || true
+    echo ""
+  fi
+
+  # Failed tasks
+  if [[ -d "${BUTLER_ROOT}/board/failed" ]] && [[ "$(_count_md "${BUTLER_ROOT}/board/failed")" -gt 0 ]]; then
+    echo "--- Failed ---"
+    board_list --status failed --format short 2>/dev/null || true
+    echo ""
+  fi
+
+  # Pending tasks
+  if [[ -d "${BUTLER_ROOT}/board/inbox" ]] && [[ "$(_count_md "${BUTLER_ROOT}/board/inbox")" -gt 0 ]]; then
+    echo "--- Pending ---"
+    board_list --status inbox --format short 2>/dev/null || true
+    echo ""
+  fi
+
+  # Active tasks
+  if [[ -d "${BUTLER_ROOT}/board/active" ]] && [[ "$(_count_md "${BUTLER_ROOT}/board/active")" -gt 0 ]]; then
+    echo "--- Active ---"
+    board_list --status active --format short 2>/dev/null || true
+    echo ""
+  fi
+
+  # Recent logs
+  echo "--- Recent Logs ---"
+  if [[ -d "${BUTLER_ROOT}/logs" ]] && [[ -n "$(command find "${BUTLER_ROOT}/logs" -maxdepth 1 -name "*.log" -type f 2>/dev/null | head -1)" ]]; then
+    command find "${BUTLER_ROOT}/logs" -maxdepth 1 -name "*.log" -type f -exec ls -lt {} + 2>/dev/null | head -5
+  else
+    echo "  (no logs yet)"
+  fi
+}
+
+cmd_workflow() {
+  local subcmd="${1:-list}"
+  shift || true
+
+  case "$subcmd" in
+    list|ls)
+      local wf_dir="${BUTLER_ROOT}/workflows"
+      if [[ -d "$wf_dir" ]] && [[ -n "$(command find "$wf_dir" -maxdepth 1 -name "*.yaml" -type f 2>/dev/null | head -1)" ]]; then
+        b_info "Available workflows:"
+        while IFS= read -r f; do
+          [[ -z "$f" ]] && continue
+          local name desc
+          name=$(grep '^name:' "$f" | head -1 | sed 's/name: *//')
+          desc=$(grep '^description:' "$f" | head -1 | sed 's/description: *//')
+          echo "  ${name}: ${desc}"
+        done < <(command find "$wf_dir" -maxdepth 1 -name "*.yaml" -type f 2>/dev/null)
+      else
+        b_info "No workflows defined. Add .yaml files to ${wf_dir}/"
+      fi
+      ;;
+    run)
+      local wf_name="${1:?Usage: acpx-butler workflow run <name>}"
+      shift || true
+      source "${ACPX_ROOT}/lib/workflow.sh"
+      workflow_run "$wf_name" "$@"
+      ;;
+    status)
+      local wf_name="${1:-}"
+      source "${ACPX_ROOT}/lib/workflow.sh"
+      workflow_status "$wf_name"
+      ;;
+    *)
+      b_err "Unknown workflow subcommand: ${subcmd}"
+      echo "Available: list, run, status"
+      return 1
+      ;;
+  esac
+}
+
+cmd_schedule() {
+  local subcmd="${1:-list}"
+  shift || true
+
+  case "$subcmd" in
+    list|ls)
+      local sched_dir="${BUTLER_ROOT}/schedules"
+      if [[ -d "$sched_dir" ]] && [[ -n "$(command find "$sched_dir" -maxdepth 1 -name "*.yaml" -type f 2>/dev/null | head -1)" ]]; then
+        b_info "Schedules:"
+        while IFS= read -r f; do
+          [[ -z "$f" ]] && continue
+          local name cron_line
+          name=$(grep '^name:' "$f" | head -1 | sed 's/name: *//')
+          cron_line=$(grep '^cron:' "$f" | head -1 | sed 's/cron: *//')
+          echo "  ${name}: ${cron_line}"
+        done < <(command find "$sched_dir" -maxdepth 1 -name "*.yaml" -type f 2>/dev/null)
+      else
+        b_info "No schedules defined. Add .yaml files to ${BUTLER_ROOT}/schedules/"
+      fi
+      ;;
+    tick)
+      source "${ACPX_ROOT}/lib/scheduler.sh"
+      scheduler_tick
+      ;;
+    *)
+      b_err "Unknown schedule subcommand: ${subcmd}"
+      echo "Available: list, tick"
+      return 1
+      ;;
+  esac
+}
+
+cmd_daemon() {
+  local interval=60
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --interval) interval="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+
+  b_info "Starting butler daemon (interval: ${interval}s)"
+  b_info "Press Ctrl+C to stop"
+
+  trap 'b_info "Daemon stopped"; exit 0' SIGINT SIGTERM
+
+  while true; do
+    # Tick schedules
+    if [[ -f "${ACPX_ROOT}/lib/scheduler.sh" ]]; then
+      source "${ACPX_ROOT}/lib/scheduler.sh"
+      scheduler_tick 2>/dev/null || true
+    fi
+
+    # Run pending tasks
+    monitor_loop --limit 5 2>/dev/null || true
+
+    sleep "$interval"
+  done
+}
+
+# ─── Usage ─────────────────────────────────────────────────────
+
+usage() {
+  cat <<'USAGE'
+acpx-butler — Task orchestration for acpx
+
+Usage:
+  acpx-butler <command> [subcommand] [options]
+
+Commands:
+  board init                        Initialize task board
+  board add --title "task" [...]    Add a task
+  board list [--status X] [--tag X] List tasks
+  board show <id>                   Show task details
+  board move <id> <status>          Move task to status
+  board next                        Get next executable task
+  board stats                       Board statistics
+  board retry <id>                  Retry a failed task
+  board unblock                     Unblock tasks with met deps
+
+  do <id>                           Execute a single task
+  run [--limit N] [--dry-run]       Run all pending tasks
+  health                            Health check
+
+  workflow list                      List workflows
+  workflow run <name> [key=val ...]  Run a workflow
+  workflow status [name]             Workflow status
+
+  schedule list                      List schedules
+  schedule tick                      Trigger due schedules
+
+  daemon [--interval 60]            Run as background daemon
+  report [today|weekly]             Progress report
+
+Task Types:
+  shell     Run a shell command
+  agent     Dispatch to an AI agent
+  council   Multi-agent deliberation
+  pipeline  Sequential agent pipeline
+
+Examples:
+  acpx-butler board init
+  acpx-butler board add --title "Run exp" --type shell --command "python train.py"
+  acpx-butler board add --title "Analyze" --type agent --task "Analyze results" --assign-to claude
+  acpx-butler run
+  acpx-butler report
+USAGE
+}
+
+# ─── Main ──────────────────────────────────────────────────────
+
+cmd="${1:-help}"
+shift || true
+
+case "$cmd" in
+  board)     cmd_board "$@" ;;
+  do)        cmd_do_task "$@" ;;
+  run)       cmd_run "$@" ;;
+  health)    cmd_health ;;
+  report)    cmd_report "$@" ;;
+  workflow)  cmd_workflow "$@" ;;
+  schedule)  cmd_schedule "$@" ;;
+  daemon)    cmd_daemon "$@" ;;
+  help|--help|-h)
+    usage ;;
+  *)
+    # Try to treat numeric input as a task ID
+    if [[ "$cmd" =~ ^[0-9]+$ ]]; then
+      cmd_do_task "$cmd"
+    else
+      b_err "Unknown command: ${cmd}"
+      echo "Run 'acpx-butler help' for usage."
+      exit 1
+    fi
+    ;;
+esac

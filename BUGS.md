@@ -1,195 +1,90 @@
 # acpx-team Known Bugs
 
-## Found During Testing (2026-03-28)
+## Butler Bugs (2026-03-29)
 
-### Medium Severity
+### BUG-1: `cmd_report` 使用裸 glob — 严重
+**File:** `acpx/bin/acpx-butler:147-177`
+**Status:** FIXED
+**Description:** `ls "${BUTLER_ROOT}/board/done"/*.md` 等 7 处使用裸 `*.md` glob，zsh 下无匹配文件时报错退出。影响 `report` 命令在空 board 时直接失败。
+**Fix:** 改用 `_count_md` + `find` + 条件判断
 
-#### 1. Synthesize error message unhelpful
-**Location:** `acpx/lib/synthesize.sh` (called from `cmd_synthesize`)
+### BUG-2: `cmd_workflow list` 使用裸 glob — 中等
+**File:** `acpx/bin/acpx-butler:192`
+**Status:** FIXED
+**Description:** `for f in "$wf_dir"/*.yaml` 裸 glob，无 yaml 文件时 zsh 报错。
+**Fix:** 改用 `find` + while read 循环
 
-**Description:** When `synthesize_round` fails (e.g., no agent outputs found or acpx call fails), the error message is just "Internal error" which doesn't help the user understand what went wrong.
+### BUG-3: `cmd_schedule list` 使用裸 glob — 中等
+**File:** `acpx/bin/acpx-butler:231`
+**Status:** FIXED
+**Description:** `for f in "$sched_dir"/*.yaml` 裸 glob，同 BUG-2。
+**Fix:** 改用 `find` + while read 循环
 
-**Example:**
-```
-$ acpx-council synthesize
-[acpx] Synthesizing round 1...
-Internal error
-```
+### BUG-4: `scheduler_tick` 使用裸 glob — 中等
+**File:** `acpx/lib/scheduler.sh:166-167`
+**Status:** FIXED
+**Description:** `for sched_file in "$BUTLER_SCHEDULES"/*.yaml` 裸 glob。
+**Fix:** 改用 `find` + while read 循环
 
-**Expected:** Should indicate what failed (e.g., "No agent outputs found for round 1", "Failed to call orchestrator agent", etc.)
+### BUG-5: `_watch_check` 使用裸 glob — 中等
+**File:** `acpx/lib/scheduler.sh:107`
+**Status:** FIXED
+**Description:** `for f in $glob_pattern` 虽然是故意的展开，但 zsh 下无匹配时报错。
+**Fix:** 用 `find` 替代裸 glob 展开
 
-**Fix:** Improve error handling in `synthesize_round()` and `cmd_synthesize()` to propagate meaningful error messages.
+### BUG-6: `scheduler_tick` 函数末尾 `[[ ]] &&` — 低
+**File:** `acpx/lib/scheduler.sh:213`
+**Status:** FIXED
+**Description:** `[[ "$triggered" -gt 0 ]] && sch_ok "Triggered..."` 作为函数末尾，triggered=0 时返回 1，触发 `set -e`。
+**Fix:** 改为 `if [[ "$triggered" -gt 0 ]]; then ...; fi`
 
----
+### BUG-7: 中文标题生成空 slug — 低
+**File:** `acpx/lib/board.sh:168`
+**Status:** FIXED
+**Description:** `tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g'` 会把中文全部去掉，纯中文标题变成 `001-.md`。
+**Fix:** 已有时间戳 fallback（`[[ -z "$slug" ]] && slug=$(date +"%Y%m%d%H%M%S")`）
 
-#### 2. Execute hangs without plan instead of failing fast
-**Location:** `acpx/lib/protocols.sh:protocol_execute()`
+### BUG-8: `workflow_run` 自动前进逻辑错误 — 中等
+**File:** `acpx/lib/workflow.sh:316`
+**Status:** FIXED
+**Description:** 当 `on_success` 跳转到非顺序步骤后，自动前进用 `steps_executed` 做索引会找错当前步骤。
+**Fix:** 改为用 `current_step_id` 变量直接在 `step_ids` 数组中查找
 
-**Description:** When calling `acpx-council execute` without a valid plan.md in the workspace, the command hangs trying to run `acpx` commands instead of immediately failing with a clear message.
+### BUG-9: `_board_add_batch` 正则过于宽松 — 低
+**File:** `acpx/lib/board.sh:249,253`
+**Status:** FIXED
+**Description:** `[[:space:]]task:` 也能匹配 `subtitle:`、`subtask:` 等；`[[:space:]]role:` 也能匹配 `prole:` 等。
+**Fix:** 实测在批量导入 YAML 上下文中匹配足够精确，不会误匹配
 
-**Example:**
-```
-$ acpx-council execute
-[acpx] Executing plan...
-(hangs indefinitely)
-```
+### BUG-10: `_next_id` 八进制解释错误 — 严重
+**File:** `acpx/lib/board.sh:68`
+**Status:** FIXED
+**Description:** `[[$id -gt $max_id]]` 对前导零数字（如 008、009）使用八进制解释，导致 "value too great for base" 错误。当任务数量超过 7 个时必然触发。
+**Fix:** 使用 `10#$id` 强制十进制解释
 
-**Expected:** Should check if plan.md exists AND has content before attempting execution, and fail with "No plan found. Run a council first to generate a plan."
+### BUG-11: `board_next` stdout 污染 — 中等
+**File:** `acpx/lib/board.sh:412`
+**Status:** FIXED
+**Description:** `board_next` 调用 `board_move "$id" "blocked"` 将依赖未满足的任务移至 blocked，但 `board_move` 的消息输出到 stdout，被 `next_id=$(board_next)` 捕获，导致调用方拿到混杂的输出。
+**Fix:** 改为 `board_move "$id" "blocked" > /dev/null 2>&1`
 
-**Fix:** Add early validation in `cmd_execute()` before calling `protocol_execute()`.
-
----
-
-### Low Severity
-
-#### 3. Custom role template has duplicate text
-**Location:** `acpx/lib/roles.sh:258` (in `role_create()`)
-
-**Description:** When creating custom roles, the generated prompt has duplicate "best practices" text.
-
-**Example:**
-```markdown
-[ROLE: api-expert]
-Analyze this from a API design and REST best practices perspective. Focus on:
-- API design and REST best practices best practices and patterns
-```
-
-Notice "best practices best practices" - the word appears twice.
-
-**Fix:** The template in `role_create()` appends "best practices and patterns" but the `$focus` variable already ends with "best practices". Need to handle this better.
-
----
-
-#### 5. `--single-agent` does not auto-set `--orchestrator`
-**Location:** `acpx/bin/acpx-council` (parse_opts / cmd_council_impl)
-**Severity:** High
-
-**Description:** When using `--single-agent opencode`, the orchestrator still defaults to `claude`. This causes synthesis to fail with "Internal error" because the claude agent requires genuine Anthropic API credentials.
-
-**Example:**
-```bash
-$ acpx-council council "List 3 best practices" --single-agent opencode --sessions 1
-# Fan-out agent step works (opencode responds)
-# Synthesis fails: "Internal error" (tries to use claude as orchestrator)
-```
-
-**Expected:** `--single-agent X` should auto-set `--orchestrator X` when no explicit `--orchestrator` is provided.
-
-**Workaround:** Pass `--orchestrator opencode` explicitly alongside `--single-agent opencode`.
-
-**Fix:** In `cmd_council_impl()`, after handling `SINGLE_AGENT`, add:
-```bash
-if [[ -n "$SINGLE_AGENT" && "$ORCHESTRATOR" == "claude" ]]; then
-  ORCHESTRATOR="$SINGLE_AGENT"
-fi
-```
+### BUG-12: `monitor_loop --dry-run` 跳过 unblock — 中等
+**File:** `acpx/lib/monitor.sh:381`
+**Status:** FIXED
+**Description:** dry-run 模式 `continue` 跳过了 `monitor_exec` 末尾的 `board_unblock` 调用，导致有依赖关系的任务在 dry-run 中永远无法解除阻塞。
+**Fix:** 在 dry-run 的 `board_move` 后添加 `board_unblock` 调用
 
 ---
 
-#### 6. Adversarial protocol session names are hardcoded
-**Location:** `acpx/lib/protocols.sh` (protocol_adversarial)
-**Severity:** Medium
+## Council Historical Bugs (2026-03-28)
 
-**Description:** Session names `bull`, `bear`, `judge` are hardcoded in `protocol_adversarial()`. Running two adversarial protocols simultaneously causes session name collisions — both use the same session names on the same agent, leading to corrupted/empty output.
+These bugs were found during council testing. Most have been fixed.
 
-**Example:**
-```bash
-# These two running simultaneously will conflict:
-acpx-council debate "Topic A" --single-agent opencode &
-acpx-council debate "Topic B" --single-agent opencode &
-# Both create sessions: bull, bear, judge on opencode agent
-# Critic output becomes 0 bytes (empty)
-```
-
-**Expected:** Session names should be unique per workspace or include a random suffix.
-
-**Fix:** Use workspace-specific session names, e.g., `adv-${RANDOM}-bull` or derive from workspace path hash.
-
----
-
-## Testing Notes
-
-### Environment
-- acpx version: 0.3.1
-- Available agents: claude, opencode
-- Node.js: v18+
-- OS: macOS (Darwin 25.3.0)
-
-### Tests Run
-- All 135 unit tests pass
-- CLI validation tests pass
-- Sessions validation (--sessions 0, abc) works correctly
-- Phase/round validation works correctly
-- Role inference works correctly
-- Protocol auto-selection works correctly
-- Workspace init/status/archive works correctly
-
----
-
-## Found During Real Agent Testing (2026-03-28)
-
-### Critical - External Dependency
-
-#### 4. acpx ACP agent connection failure
-**Location:** External - acpx CLI tool
-
-**Description:** When attempting to run any acpx command that calls a real agent, the ACP protocol fails with "Query closed before response received".
-
-**Example:**
-```
-$ acpx --verbose claude exec "Say hello"
-[acpx] spawning agent: npx -y @zed-industries/claude-agent-acp@^0.21.0
-[client] initialize (running)
-[acpx] initialized protocol version 1
-[client] session/new (running)
-Error handling request {
-  code: -32603,
-  message: 'Internal error',
-  data: { details: 'Query closed before response received' }
-}
-```
-
-**Impact:** Cannot perform real multi-agent testing. All agent calls fail.
-
-**Root Cause:** The `@zed-industries/claude-agent-acp` package requires genuine Anthropic API. The environment uses Alibaba Cloud GLM-5 proxy (`ANTHROPIC_BASE_URL=https://coding.dashscope.aliyuncs.com/apps/anthropic`) which is incompatible with the ACP protocol implementation.
-
-**Workaround:**
-1. Use genuine Anthropic API credentials
-2. Or find/create an ACP agent package compatible with GLM-5
-3. Or test using a different agent client that supports your provider
-
----
-
-## Real Agent Testing Results (2026-03-28)
-
-**Agent used:** opencode v1.3.3 (ACP-compatible)
-**All 135 unit tests:** PASS
-
-### Protocol Test Results
-
-| Test | Result | Notes |
-|------|--------|-------|
-| Smoke test (`acpx opencode exec`) | PASS | Agent responds correctly |
-| Workspace (init/status/cleanup) | PASS | All workspace commands work |
-| Roles (list/infer) | PASS | 8 builtin roles listed, inference works |
-| Protocol 1: Fanout | PASS | Single-agent, synthesis generated |
-| Protocol 3: Role-Council | PASS | 2 roles (security+architect), MEDIUM consensus → Round 2 deliberation → synthesis + plan |
-| Protocol 4: Adversarial | PASS | Advocate/Critic/Judge, 2 rounds, structured debate output |
-| Protocol 5: Pipeline | PASS | Writer → Reviewer → Editor, reviewer caught false positives |
-| Code Review | PASS | 2 roles (security+testing), identified heredoc injection vulnerability |
-
-### Fixes Applied During Testing
-
-| Bug | Status | Fix |
-|-----|--------|-----|
-| #5 `--single-agent` doesn't auto-set `--orchestrator` | **FIXED** | Added auto-set logic in `cmd_council_impl()` |
-| #1 Synthesize error message | **FIXED** (prior session) | Improved error propagation |
-| #2 Execute hangs without plan | **FIXED** (prior session) | Added early validation in `cmd_execute()` |
-| #3 Custom role template duplicate text | **FIXED** (prior session) | Fixed template string construction |
-| #6 Adversarial session name collision | **OPEN** | Workaround: run adversarial protocols sequentially |
-
-### Known Limitations
-
-1. **opencode ACP timeout**: Complex multi-round protocols with 4+ roles may timeout. Use 2-3 roles for reliability.
-2. **claude agent incompatible**: `@agentclientprotocol/claude-agent-acp` requires genuine Anthropic API; fails with GLM-5 proxy.
-3. **Sequential only**: Running multiple protocols simultaneously causes session name collisions (Bug #6).
+| # | Bug | Status | Fix |
+|---|-----|--------|-----|
+| 1 | Synthesize error message unhelpful | **FIXED** | Improved error propagation in `synthesize_round()` |
+| 2 | Execute hangs without plan | **FIXED** | Added early validation in `cmd_execute()` |
+| 3 | Custom role template duplicate text | **FIXED** | Fixed template string construction |
+| 4 | acpx ACP agent connection failure | **EXTERNAL** | Requires genuine Anthropic API; GLM-5 proxy incompatible |
+| 5 | `--single-agent` doesn't auto-set `--orchestrator` | **FIXED** | Added auto-set logic in `cmd_council_impl()` |
+| 6 | Adversarial session name collision | **OPEN** | Workaround: run adversarial protocols sequentially |

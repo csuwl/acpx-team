@@ -17,15 +17,17 @@
     "openclaw"
   ],
   "bin": {
-    "acpx-council": "./acpx-council.js"
+    "acpx-council": "./acpx-council.js",
+    "acpx-butler": "./acpx-butler.js"
   },
   "files": [
     "acpx/",
-    "acpx-council.js"
+    "acpx-council.js",
+    "acpx-butler.js"
   ],
   "scripts": {
-    "test": "bash -n acpx/bin/acpx-council && bash -n acpx/lib/*.sh && echo 'All scripts pass syntax check'",
-    "lint": "shellcheck acpx/bin/acpx-council acpx/lib/*.sh || true"
+    "test": "bash -n acpx/bin/acpx-council && bash -n acpx/bin/acpx-butler && bash -n acpx/lib/*.sh && echo 'All scripts pass syntax check'",
+    "lint": "shellcheck acpx/bin/acpx-council acpx/bin/acpx-butler acpx/lib/*.sh || true"
   },
   "dependencies": {},
   "peerDependencies": {
