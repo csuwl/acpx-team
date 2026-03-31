@@ -67,6 +67,19 @@ _run_agent_plan() {
   local session="$2"
   local prompt="$3"
 
+  # Inject team context if active
+  if [[ -n "${TEAM_NAME:-}" ]]; then
+    local team_role="${TEAM_ROLE:-neutral}"
+    # Look up agent-specific role if team.sh sourced
+    if type team_get_agent_role &>/dev/null; then
+      team_role=$(team_get_agent_role "$agent" "$TEAM_NAME" 2>/dev/null) || team_role="neutral"
+    fi
+    local team_header="[TEAM: ${TEAM_NAME} | Your Role: ${team_role} | Peers: ${TEAM_PEERS:-unknown}]"
+    prompt="${team_header}
+
+${prompt}"
+  fi
+
   acpx "$agent" -s "$session" set-mode plan 2>/dev/null || true
   acpx --format quiet "$agent" -s "$session" "$prompt" 2>/dev/null
 }
@@ -76,6 +89,18 @@ _run_agent_execute() {
   local session="$2"
   local prompt="$3"
   local mode="${4:-acceptEdits}"
+
+  # Inject team context if active
+  if [[ -n "${TEAM_NAME:-}" ]]; then
+    local team_role="${TEAM_ROLE:-neutral}"
+    if type team_get_agent_role &>/dev/null; then
+      team_role=$(team_get_agent_role "$agent" "$TEAM_NAME" 2>/dev/null) || team_role="neutral"
+    fi
+    local team_header="[TEAM: ${TEAM_NAME} | Your Role: ${team_role} | Peers: ${TEAM_PEERS:-unknown}]"
+    prompt="${team_header}
+
+${prompt}"
+  fi
 
   acpx "$agent" -s "$session" set-mode "$mode" 2>/dev/null || true
   acpx --format quiet "$agent" -s "$session" "$prompt" 2>/dev/null

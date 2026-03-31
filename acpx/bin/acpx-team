@@ -1,0 +1,381 @@
+#!/usr/bin/env bash
+# acpx-team — Team management CLI for cross-session agent collaboration
+# Thin wrapper: sources team.sh, delegates to board/council/workflow
+#
+# Usage:
+#   acpx-team create <name> [--agents auto|claude,codex] [--roles auto|security,arch]
+#   acpx-team quick <task> [--agents auto]
+#   acpx-team resume <name>
+#   acpx-team pause
+#   acpx-team status [name]
+#   acpx-team list
+#   acpx-team agents <list|add|remove>
+#   acpx-team context <show|save>
+#   acpx-team council <task> [options]
+#   acpx-team board <add|list|next|exec>
+#   acpx-team destroy <name>
+
+set -uo pipefail
+
+ACPX_ROOT="${ACPX_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+ACPX_TEAMS_DIR="${ACPX_TEAMS_DIR:-.acpx-teams}"
+ACPX_ACTIVE_LINK="${ACPX_TEAMS_DIR}/active"
+
+# Source libraries
+source "${ACPX_ROOT}/lib/team.sh"
+source "${ACPX_ROOT}/lib/roles.sh"
+
+# ─── Color Output ──────────────────────────────────────────────
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+info()  { echo -e "${BLUE}[team]${NC} $*"; }
+ok()    { echo -e "${GREEN}[ok]${NC} $*"; }
+warn()  { echo -e "${YELLOW}[warn]${NC} $*"; }
+err()   { echo -e "${RED}[error]${NC} $*" >&2; }
+
+# ─── Argument Parsing ──────────────────────────────────────────
+
+cmd="${1:-help}"
+shift || true
+
+AGENTS="auto"
+ROLES="auto"
+ORCHESTRATOR="claude"
+TASK=""
+TEAM=""
+POSITIONAL_ARGS=()
+
+parse_opts() {
+  POSITIONAL_ARGS=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --agents|-a)
+        AGENTS="$2"; shift 2 ;;
+      --roles|-r)
+        ROLES="$2"; shift 2 ;;
+      --orchestrator|-o)
+        ORCHESTRATOR="$2"; shift 2 ;;
+      --team|-t)
+        TEAM="$2"; shift 2 ;;
+      --help|-h)
+        usage; exit 0 ;;
+      *)
+        if [[ -z "$TASK" ]]; then
+          TASK="$1"
+        fi
+        POSITIONAL_ARGS+=("$1")
+        shift ;;
+    esac
+  done
+}
+
+# ─── Commands ──────────────────────────────────────────────────
+
+cmd_create() {
+  local name="${POSITIONAL_ARGS[0]:-${TASK:?}}"
+  if [[ -z "$name" ]]; then
+    err "Usage: acpx-team create <name> [--agents|-a] [--roles|-r]"
+    exit 1
+  fi
+  info "Creating team '${name}'..."
+  team_init "$name" "$AGENTS" "$ROLES"
+}
+
+cmd_quick() {
+  local task="${TASK}"
+  if [[ -z "$task" ]]; then
+    err "Usage: acpx-team quick <task> [--agents|-a]"
+    exit 1
+  fi
+  info "Quick-creating team for: ${task}"
+  team_quick_create "$task" "$AGENTS"
+}
+
+cmd_resume() {
+  local name="${POSITIONAL_ARGS[0]:-${TASK}}"
+  if [[ -z "$name" ]]; then
+    # Try to resume active team
+    name=$(team_active) || { err "No active team. Usage: acpx-team resume <name>"; exit 1; }
+  fi
+  team_load "$name"
+}
+
+cmd_pause() {
+  local name="${POSITIONAL_ARGS[0]:-}"
+  if [[ -z "$name" ]]; then
+    name=$(team_active) || { err "No active team to pause."; exit 1; }
+  fi
+  info "Pausing team '${name}'..."
+  team_set_state "$name" "paused"
+  ok "Team '${name}' paused. Resume with: acpx-team resume ${name}"
+}
+
+cmd_archive() {
+  local name="${POSITIONAL_ARGS[0]:-}"
+  if [[ -z "$name" ]]; then
+    name=$(team_active) || { err "No active team to archive."; exit 1; }
+  fi
+  info "Archiving team '${name}'..."
+  team_set_state "$name" "archived"
+  ok "Team '${name}' archived."
+}
+
+cmd_status() {
+  local name="${POSITIONAL_ARGS[0]:-}"
+  team_status "$name"
+}
+
+cmd_list() {
+  echo "Teams:"
+  team_list
+}
+
+cmd_agents() {
+  local subcmd="${1:-list}"
+  shift || true
+  local team_name="${TEAM:-$(team_active 2>/dev/null)}"
+
+  case "$subcmd" in
+    list|ls)
+      if [[ -n "$team_name" ]]; then
+        team_agent_list "$team_name"
+      else
+        err "No active team. Use --team or resume a team first."
+        exit 1
+      fi
+      ;;
+    add)
+      local agent="${1:?Usage: acpx-team agents add <agent> [role]}"
+      local role="${2:-neutral}"
+      if [[ -z "$team_name" ]]; then
+        err "No active team. Use --team or resume a team first."
+        exit 1
+      fi
+      team_agent_add "$team_name" "$agent" "$role"
+      ;;
+    remove|rm)
+      local agent="${1:?Usage: acpx-team agents remove <agent>}"
+      if [[ -z "$team_name" ]]; then
+        err "No active team. Use --team or resume a team first."
+        exit 1
+      fi
+      team_agent_remove "$team_name" "$agent"
+      ;;
+    *)
+      err "Unknown agents subcommand: ${subcmd}"
+      echo "Available: list, add, remove"
+      exit 1
+      ;;
+  esac
+}
+
+cmd_context() {
+  local subcmd="${1:-show}"
+  shift || true
+  local team_name="${TEAM:-$(team_active 2>/dev/null)}"
+
+  if [[ -z "$team_name" ]]; then
+    err "No active team. Use --team or resume a team first."
+    exit 1
+  fi
+
+  case "$subcmd" in
+    show|cat)
+      team_load_context "$team_name"
+      ;;
+    save)
+      local key="${1:?Usage: acpx-team context save <key> <value>}"
+      local value="${2:?Usage: acpx-team context save <key> <value>}"
+      team_save_context "$team_name" "$key" "$value"
+      ok "Context saved: ${key}"
+      ;;
+    *)
+      err "Unknown context subcommand: ${subcmd}"
+      echo "Available: show, save"
+      exit 1
+      ;;
+  esac
+}
+
+cmd_council() {
+  local task="${TASK}"
+  if [[ -z "$task" ]]; then
+    err "Usage: acpx-team council <task> [options]"
+    exit 1
+  fi
+
+  local team_name="${TEAM:-$(team_active 2>/dev/null)}"
+  if [[ -z "$team_name" ]]; then
+    err "No active team. Use --team or create one first."
+    exit 1
+  fi
+
+  # Load team (sets BUTLER_ROOT, ACPX_WORKSPACE to team scope)
+  team_load "$team_name" > /dev/null
+
+  # Source council libraries and run
+  source "${ACPX_ROOT}/lib/workspace.sh"
+  source "${ACPX_ROOT}/lib/synthesize.sh"
+  source "${ACPX_ROOT}/lib/protocols.sh"
+
+  # Use team's orchestrator if not overridden
+  local orch
+  orch=$(_team_read_field "${ACPX_TEAMS_DIR}/${team_name}/team.yaml" "orchestrator") || orch="$ORCHESTRATOR"
+
+  info "Running council in team '${team_name}' scope"
+  protocol_role_council "$task" "$AGENTS" "$ROLES" "$orch"
+
+  ok "Council complete. Results in ${ACPX_WORKSPACE}/"
+}
+
+cmd_board() {
+  local subcmd="${1:-list}"
+  shift || true
+  local team_name="${TEAM:-$(team_active 2>/dev/null)}"
+
+  if [[ -z "$team_name" ]]; then
+    err "No active team. Use --team or resume a team first."
+    exit 1
+  fi
+
+  # Load team scope
+  team_load "$team_name" > /dev/null
+  source "${ACPX_ROOT}/lib/board.sh"
+  source "${ACPX_ROOT}/lib/monitor.sh"
+
+  case "$subcmd" in
+    list|ls)
+      board_list
+      ;;
+    add)
+      local title="${1:?Usage: acpx-team board add --title <title>}"
+      shift || true
+      board_add "$@"
+      ;;
+    next)
+      local next_id
+      next_id=$(board_next)
+      if [[ -n "$next_id" ]]; then
+        info "Next task: ${next_id}"
+        echo "$next_id"
+      else
+        info "No tasks in inbox."
+      fi
+      ;;
+    exec|run)
+      local id="${1:?Usage: acpx-team board exec <id>}"
+      monitor_exec "$id"
+      ;;
+    stats)
+      board_stats
+      ;;
+    *)
+      err "Unknown board subcommand: ${subcmd}"
+      echo "Available: list, add, next, exec, stats"
+      exit 1
+      ;;
+  esac
+}
+
+cmd_destroy() {
+  local name="${POSITIONAL_ARGS[0]:-${TASK}}"
+  if [[ -z "$name" ]]; then
+    err "Usage: acpx-team destroy <name>"
+    exit 1
+  fi
+
+  warn "This will archive and delete team '${name}'"
+  read -r -p "Confirm? [y/N] " response
+  [[ "$response" =~ ^[Yy] ]] || { info "Cancelled."; exit 0; }
+
+  team_destroy "$name"
+}
+
+# ─── Usage ─────────────────────────────────────────────────────
+
+usage() {
+  cat <<'USAGE'
+acpx-team — Cross-session team management CLI
+
+Usage:
+  acpx-team <command> [options] [task]
+
+Commands:
+  create <name>         Create a new team with agents and roles
+  quick <task>          One-command: create team from task, auto-infer roles
+  resume <name>         Load team, set active, scope board/workspace
+  pause                 Pause active team (clears active symlink)
+  status [name]         Show team details, agents, board stats
+  list                  List all teams
+  agents <subcmd>       Manage agents: list|add|remove
+  context <subcmd>      Butler context: show|save
+  council <task>        Run council protocol in team scope
+  board <subcmd>        Manage board: list|add|next|exec|stats
+  destroy <name>        Archive and delete a team
+
+Options:
+  --agents, -a       Agents: auto|comma-separated (default: auto)
+  --roles, -r        Roles: auto|comma-separated (default: auto)
+  --orchestrator, -o Synthesis agent (default: claude)
+  --team, -t         Team name (for commands that need a team)
+
+Examples:
+  # Create a team
+  acpx-team create my-project --agents claude,codex --roles security,architect
+
+  # Quick-create from a task (auto-infers roles)
+  acpx-team quick "Add Redis caching to the API"
+
+  # Resume in a new session
+  acpx-team resume my-project
+
+  # Run a council in team scope
+  acpx-team council "Review auth.ts for security issues"
+
+  # Add an agent
+  acpx-team agents add gemini perf
+
+  # Save butler context for next session
+  acpx-team context save "key decision" "We chose Redis over Memcached"
+
+  # Check status
+  acpx-team status
+
+  # Pause for now
+  acpx-team pause
+
+  # Resume later
+  acpx-team resume my-project
+USAGE
+}
+
+# ─── Main ──────────────────────────────────────────────────────
+
+parse_opts "$@"
+
+case "$cmd" in
+  create)   cmd_create ;;
+  quick)    cmd_quick ;;
+  resume)   cmd_resume ;;
+  pause)    cmd_pause ;;
+  archive)  cmd_archive ;;
+  status)   cmd_status ;;
+  list)     cmd_list ;;
+  agents)   cmd_agents "${POSITIONAL_ARGS[@]}" ;;
+  context)  cmd_context "${POSITIONAL_ARGS[@]}" ;;
+  council)  cmd_council ;;
+  board)    cmd_board "${POSITIONAL_ARGS[@]}" ;;
+  destroy)  cmd_destroy ;;
+  help|--help|-h)
+    usage ;;
+  *)
+    # Treat unknown command as a task for quick create
+    TASK="$cmd ${POSITIONAL_ARGS[*]}"
+    cmd_quick
+    ;;
+esac

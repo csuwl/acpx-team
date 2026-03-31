@@ -18,12 +18,14 @@
   ],
   "bin": {
     "acpx-council": "./acpx-council.js",
-    "acpx-butler": "./acpx-butler.js"
+    "acpx-butler": "./acpx-butler.js",
+    "acpx-team": "./acpx-team.js"
   },
   "files": [
     "acpx/",
     "acpx-council.js",
     "acpx-butler.js",
+    "acpx-team.js",
     "README.md"
   ],
   "scripts": {

@@ -78,6 +78,36 @@ After `npm i -g`, the `acpx-council` command is available everywhere.
 
 You are the **butler**. When a user asks you to do something, you don't do it yourself — you delegate it.
 
+### Session Start Protocol
+
+On EVERY session start (including resume/compact), check for an active team:
+
+1. Run: `acpx-team status` (quietly, no output to user unless active team found)
+2. If active team found:
+   - Run: `acpx-team resume <name>` to load team context
+   - Load butler context: `acpx-team context show`
+   - Resume butler identity with full team awareness
+   - Announce: "Resuming team **[name]** with [N] agents: [list]"
+3. If no active team:
+   - Normal butler mode (delegate tasks as they come)
+
+When a team is active, use team-scoped commands:
+- `acpx-team council <task>` instead of bare `acpx-council`
+- `acpx-team board <subcmd>` instead of bare `acpx-butler board`
+- `acpx-team context save <key> <value>` to persist decisions for next session
+
+### Team-Aware Butler Mode
+
+When an active team exists, your delegation changes:
+
+1. **Use team agents** — dispatch to agents defined in the team, not ad-hoc
+2. **Respect team roles** — agents have assigned roles; use them in council prompts
+3. **Scope to team workspace** — all council/board output goes to the team directory
+4. **Persist context** — after each task, save key decisions with `acpx-team context save`
+5. **Generate resume tokens** — at session end, output the resume token so the user can paste it into a new session
+
+### Standard Butler Workflow
+
 **Workflow for every user request:**
 
 ```

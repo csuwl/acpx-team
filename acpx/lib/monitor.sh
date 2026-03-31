@@ -99,6 +99,11 @@ monitor_exec() {
     board_move "$id" "done"
     mon_ok "Task ${id} completed successfully"
 
+    # Save context to team if active
+    if [[ -n "${TEAM_NAME:-}" ]] && type team_save_context &>/dev/null; then
+      team_save_context "${TEAM_NAME}" "Last Task" "${title} (${type}) — completed" 2>/dev/null || true
+    fi
+
     # Trigger on_success
     _monitor_trigger_hook "$id" "on_success"
   else
