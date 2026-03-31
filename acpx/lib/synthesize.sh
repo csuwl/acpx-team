@@ -89,7 +89,7 @@ SYNPROMPT
 )
 
   # Run orchestrator agent to synthesize
-  acpx --format quiet "$orchestrator" exec "$prompt" > "$output_file"
+  acpx --format quiet "$orchestrator" exec "$prompt" > "$output_file" 2>/dev/null
 
   echo "Synthesis written to $output_file"
 }
@@ -189,6 +189,6 @@ Format as a numbered plan with:
 PLANPROMPT
 )
 
-  acpx --format quiet "$orchestrator" exec "$prompt" > "$output_file"
+  acpx --format quiet "$orchestrator" exec "$prompt" > "$output_file" 2>/dev/null
   echo "Plan written to $output_file"
 }

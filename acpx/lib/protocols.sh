@@ -3,7 +3,7 @@
 # Each protocol: Phase 1 (Plan) → consensus check → Phase 2 (Execute)
 # Compatible with Bash 3.2+ (no mapfile, no associative arrays)
 
-set -euo pipefail
+set -uo pipefail
 
 ACPX_ROOT="${ACPX_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 ACPX_WORKSPACE="${ACPX_WORKSPACE:-.acpx-workspace}"
@@ -68,7 +68,7 @@ _run_agent_plan() {
   local prompt="$3"
 
   acpx "$agent" -s "$session" set-mode plan 2>/dev/null || true
-  acpx --format quiet "$agent" -s "$session" "$prompt"
+  acpx --format quiet "$agent" -s "$session" "$prompt" 2>/dev/null
 }
 
 _run_agent_execute() {
@@ -78,7 +78,7 @@ _run_agent_execute() {
   local mode="${4:-acceptEdits}"
 
   acpx "$agent" -s "$session" set-mode "$mode" 2>/dev/null || true
-  acpx --format quiet "$agent" -s "$session" "$prompt"
+  acpx --format quiet "$agent" -s "$session" "$prompt" 2>/dev/null
 }
 
 # ─── Wait for PIDs and report failures ───────────────────────────
@@ -89,13 +89,30 @@ _wait_agents() {
   for spec in "$@"; do
     local pid="${spec%%:*}"
     local agent="${spec#*:}"
-    # Report failures - do NOT suppress stderr from wait
-    if ! wait "$pid"; then
-      echo "==> WARNING: Agent '${agent}' (pid ${pid}) failed with exit code $?" >&2
+    local ec=0
+    wait "$pid" || ec=$?
+    if [[ $ec -ne 0 ]]; then
+      echo "==> WARNING: Agent '${agent}' (pid ${pid}) failed (exit code ${ec})" >&2
       failed=1
     fi
   done
   return $failed
+}
+
+# ─── Agent Label Helper ─────────────────────────────────────────
+# Returns unique label for session/workspace when agents array has duplicates
+# Usage: _agent_label <agent> <index> <agents_array_newline_separated>
+_agent_label() {
+  local agent="$1"
+  local index="$2"
+  local all_agents="$3"
+  local count
+  count=$(printf '%s\n' "$all_agents" | grep -cFx "$agent" 2>/dev/null || echo 1)
+  if [[ "$count" -gt 1 ]]; then
+    echo "${agent}-${index}"
+  else
+    echo "$agent"
+  fi
 }
 
 # ─── Session Cleanup Helpers ─────────────────────────────────────
@@ -105,9 +122,13 @@ _wait_agents() {
 _cleanup_sessions() {
   local prefix="$1"
   shift
-  local agents="$*"
-  for agent in $agents; do
-    acpx "${agent}" sessions close "${prefix}-${agent}" 2>/dev/null || true
+  local all_agents="$*"
+  local i=0
+  for agent in $all_agents; do
+    local label
+    label=$(_agent_label "$agent" "$i" "$all_agents")
+    acpx "${agent}" sessions close "${prefix}-${label}" 2>/dev/null || true
+    i=$((i + 1))
   done
 }
 
@@ -154,7 +175,9 @@ protocol_fanout() {
   workspace_init "$task" "fanout"
 
   # Ensure session cleanup on exit (success or failure)
-  trap '_cleanup_sessions "fanout" "${agents[*]}"' EXIT
+  # Capture agents list before setting trap to avoid scope issue
+  local _cleanup_agents_list="${agents[*]}"
+  trap '_cleanup_sessions "fanout" "$_cleanup_agents_list"' EXIT
 
   # ── Phase 1: Plan (parallel fan-out) ──
   workspace_set_phase "plan"
@@ -162,14 +185,21 @@ protocol_fanout() {
 
   echo "==> Protocol 1: Fan-Out | ${#agents[@]} agent(s) | Plan phase"
 
+  local all_agents_str
+  all_agents_str=$(printf '%s\n' "${agents[@]}")
+
   local -a pid_specs=()
+  local i=0
   for agent in "${agents[@]}"; do
-    local session="fanout-${agent}"
+    local label
+    label=$(_agent_label "$agent" "$i" "$all_agents_str")
+    local session="fanout-${label}"
     acpx "${agent}" sessions new --name "$session" 2>/dev/null || true
 
     _run_agent_plan "$agent" "$session" "$task" \
-      | workspace_write_agent_output "$agent" 1 &
-    pid_specs+=("$!:${agent}")
+      | workspace_write_agent_output "$label" 1 &
+    pid_specs+=("$!:${label}")
+    i=$((i + 1))
   done
 
   _wait_agents "${pid_specs[@]}" || true
@@ -208,14 +238,21 @@ protocol_deliberation() {
 
   echo "==> Protocol 2: Deliberation | ${#agents[@]} agent(s) | Round 1 (Plan)"
 
+  local all_agents_str
+  all_agents_str=$(printf '%s\n' "${agents[@]}")
+
   local -a pid_specs=()
+  local i=0
   for agent in "${agents[@]}"; do
-    local session="delib-${agent}"
+    local label
+    label=$(_agent_label "$agent" "$i" "$all_agents_str")
+    local session="delib-${label}"
     acpx "${agent}" sessions new --name "$session" 2>/dev/null || true
 
     _run_agent_plan "$agent" "$session" "$task" \
-      | workspace_write_agent_output "$agent" 1 &
-    pid_specs+=("$!:${agent}")
+      | workspace_write_agent_output "$label" 1 &
+    pid_specs+=("$!:${label}")
+    i=$((i + 1))
   done
   _wait_agents "${pid_specs[@]}" || true
 
@@ -242,8 +279,11 @@ protocol_deliberation() {
   all_r1=$(workspace_gather_round 1)
 
   local -a pid_specs=()
+  local i=0
   for agent in "${agents[@]}"; do
-    local session="delib-${agent}"
+    local label
+    label=$(_agent_label "$agent" "$i" "$all_agents_str")
+    local session="delib-${label}"
     local r2_prompt="[Round 2: Deliberation]
 Other reviewers provided their analysis below. Consider their points fairly.
 Update your analysis where you find their arguments convincing. Note any remaining disagreements.
@@ -251,8 +291,9 @@ Update your analysis where you find their arguments convincing. Note any remaini
 ${all_r1}"
 
     _run_agent_plan "$agent" "$session" "$r2_prompt" \
-      | workspace_write_agent_output "$agent" 2 &
-    pid_specs+=("$!:${agent}")
+      | workspace_write_agent_output "$label" 2 &
+    pid_specs+=("$!:${label}")
+    i=$((i + 1))
   done
   _wait_agents "${pid_specs[@]}" || true
 
@@ -311,10 +352,14 @@ protocol_role_council() {
   echo "    Roles:  ${roles[*]}"
 
   local -a pid_specs=()
+  local all_agents_str
+  all_agents_str=$(printf '%s\n' "${agents[@]}")
   local i=0
   for agent in "${agents[@]}"; do
     local role="${roles[$i]:-neutral}"
-    local session="council-${agent}"
+    local label
+    label=$(_agent_label "$agent" "$i" "$all_agents_str")
+    local session="council-${label}"
 
     acpx "${agent}" sessions new --name "$session" 2>/dev/null || true
 
@@ -324,8 +369,8 @@ protocol_role_council() {
 ${task}"
 
     _run_agent_plan "$agent" "$session" "$r1_prompt" \
-      | workspace_write_agent_output "$agent" 1 &
-    pid_specs+=("$!:${agent}")
+      | workspace_write_agent_output "$label" 1 &
+    pid_specs+=("$!:${label}")
     i=$((i + 1))
   done
   _wait_agents "${pid_specs[@]}" || true
@@ -356,7 +401,9 @@ ${task}"
   i=0
   for agent in "${agents[@]}"; do
     local role="${roles[$i]:-neutral}"
-    local session="council-${agent}"
+    local label
+    label=$(_agent_label "$agent" "$i" "$all_agents_str")
+    local session="council-${label}"
 
     local r2_prompt
     r2_prompt="$(role_get_r2 "$role")
@@ -365,8 +412,8 @@ Other experts' analysis:
 ${all_r1}"
 
     _run_agent_plan "$agent" "$session" "$r2_prompt" \
-      | workspace_write_agent_output "$agent" 2 &
-    pid_specs+=("$!:${agent}")
+      | workspace_write_agent_output "$label" 2 &
+    pid_specs+=("$!:${label}")
     i=$((i + 1))
   done
   _wait_agents "${pid_specs[@]}" || true
