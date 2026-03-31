@@ -1,6 +1,18 @@
 # acpx-team Known Bugs
 
-No open bugs at this time.
+## Open Bugs
+
+None.
+
+---
+
+## Historical Bug Records
+
+### Monitor Bugs (2026-03-30) — All Fixed
+
+| # | Bug | Status | Fix |
+|---|-----|--------|-----|
+| 7 | `$'\0'` null byte check rejects all commands | **FIXED** | Removed — bash vars can't hold null bytes, so `$'\0'` = empty string, making `*$'\0'*` match everything |
 
 ---
 
@@ -23,4 +35,4 @@ stdout pollution in board_next (BUG-11), dry-run missing unblock (BUG-12).
 | 3 | Custom role template duplicate text | **FIXED** | Fixed template construction |
 | 4 | acpx ACP agent connection failure | **EXTERNAL** | Requires genuine Anthropic API |
 | 5 | `--single-agent` auto-set `--orchestrator` | **FIXED** | Added auto-set logic |
-| 6 | Adversarial session name collision | **OPEN** | Run adversarial protocols sequentially |
+| 6 | Adversarial session name collision | **FIXED** | Sequential session naming with unique suffix |

@@ -19,6 +19,17 @@ _safe_sed_inplace() {
   rm -f "${file}.bak"
 }
 
+# Escape YAML special characters in scalar values
+# Prevents YAML frontmatter injection via --- or other special sequences
+_yaml_escape() {
+  local text="$1"
+  # Replace dangerous YAML document separator --- with --
+  text="${text//---/--}"
+  # Also handle potential ... document end marker
+  text="${text//\.\.\./\.\..}"
+  printf '%s' "$text"
+}
+
 # Read a frontmatter field from a task file
 _read_field() {
   local file="$1"
@@ -162,6 +173,11 @@ board_add() {
 
   [[ -z "$title" ]] && { echo "Error: --title is required" >&2; return 1; }
 
+  # Security: escape YAML special characters in title and assign_to
+  local safe_title safe_assign_to
+  safe_title=$(_yaml_escape "$title")
+  safe_assign_to=$(_yaml_escape "$assign_to")
+
   local id
   id=$(_next_id)
   local slug
@@ -179,12 +195,12 @@ board_add() {
   cat > "$filepath" <<TASK
 ---
 id: ${id}
-title: ${title}
+title: ${safe_title}
 type: ${type}
 priority: ${priority}
 status: inbox
 created: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
-assign_to: ${assign_to}
+assign_to: ${safe_assign_to}
 role: ${role}
 blocked_by: ${blocked_fm}
 retry_count: 0

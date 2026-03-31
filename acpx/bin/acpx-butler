@@ -255,7 +255,15 @@ cmd_daemon() {
   local interval=60
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --interval) interval="$2"; shift 2 ;;
+      --interval)
+        interval="$2"
+        # Validate interval: must be a positive integer
+        if ! [[ "$interval" =~ ^[1-9][0-9]*$ ]]; then
+          b_err "Invalid --interval value: '${interval}' (must be a positive integer)"
+          return 1
+        fi
+        shift 2
+        ;;
       *) shift ;;
     esac
   done

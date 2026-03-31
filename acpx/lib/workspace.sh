@@ -22,6 +22,24 @@ workspace_init() {
   local task="${1:?Usage: workspace_init <task_description>}"
   local protocol="${2:-auto}"
 
+  # Security: validate ACPX_WORKSPACE path to prevent dangerous rm -rf
+  # Must not be empty, root, or home directory
+  if [[ -z "$ACPX_WORKSPACE" ]]; then
+    echo "Error: ACPX_WORKSPACE cannot be empty" >&2
+    return 1
+  fi
+  # Resolve to absolute path for comparison
+  local ws_abs
+  ws_abs=$(cd "$(dirname "$ACPX_WORKSPACE")" 2>/dev/null && pwd)/$(basename "$ACPX_WORKSPACE")
+  if [[ "$ws_abs" == "/" ]]; then
+    echo "Error: ACPX_WORKSPACE cannot be root directory" >&2
+    return 1
+  fi
+  if [[ "$ws_abs" == "$HOME" ]] || [[ "$ws_abs" == "$HOME/" ]]; then
+    echo "Error: ACPX_WORKSPACE cannot be home directory" >&2
+    return 1
+  fi
+
   rm -rf "$ACPX_WORKSPACE"
   mkdir -p "$ACPX_WORKSPACE/agents"
 

@@ -17,6 +17,11 @@ source "${ACPX_ROOT}/lib/synthesize.sh"
 
 read_into_array() {
   local _varname="$1"
+
+  # Security: validate variable name to prevent eval injection
+  # Only allow valid Bash identifier: [a-zA-Z_][a-zA-Z0-9_]*
+  [[ "$_varname" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]] || { echo "Error: Invalid variable name '$_varname'" >&2; return 1; }
+
   eval "${_varname}=()"
   while IFS= read -r _line; do
     [[ -n "$_line" ]] && eval "${_varname}+=(\"\$_line\")"
@@ -84,12 +89,54 @@ _wait_agents() {
   for spec in "$@"; do
     local pid="${spec%%:*}"
     local agent="${spec#*:}"
-    if ! wait "$pid" 2>/dev/null; then
-      echo "==> WARNING: Agent '${agent}' (pid ${pid}) failed" >&2
+    # Report failures - do NOT suppress stderr from wait
+    if ! wait "$pid"; then
+      echo "==> WARNING: Agent '${agent}' (pid ${pid}) failed with exit code $?" >&2
       failed=1
     fi
   done
   return $failed
+}
+
+# ─── Session Cleanup Helpers ─────────────────────────────────────
+
+# Cleanup sessions for protocols with simple session naming
+# Usage: _cleanup_sessions <prefix> <agent1 agent2 ...>
+_cleanup_sessions() {
+  local prefix="$1"
+  shift
+  local agents="$*"
+  for agent in $agents; do
+    acpx "${agent}" sessions close "${prefix}-${agent}" 2>/dev/null || true
+  done
+}
+
+# Cleanup sessions for adversarial protocol (unique suffixes)
+# Usage: _cleanup_sessions_adversarial <advocate> <critic> <judge> <s_advocate> <s_critic> <s_judge>
+_cleanup_sessions_adversarial() {
+  local advocate="$1"
+  local critic="$2"
+  local judge="$3"
+  local s_advocate="$4"
+  local s_critic="$5"
+  local s_judge="$6"
+  acpx "$advocate" sessions close "$s_advocate" 2>/dev/null || true
+  acpx "$critic" sessions close "$s_critic" 2>/dev/null || true
+  acpx "$judge" sessions close "$s_judge" 2>/dev/null || true
+}
+
+# Cleanup sessions for pipeline protocol
+# Usage: _cleanup_sessions_pipeline <writer> <reviewer> <editor> <editor_uses_writer_session>
+_cleanup_sessions_pipeline() {
+  local writer="$1"
+  local reviewer="$2"
+  local editor="$3"
+  local editor_uses_writer_session="$4"
+  acpx "$writer" sessions close "pipe-writer" 2>/dev/null || true
+  acpx "$reviewer" sessions close "pipe-reviewer" 2>/dev/null || true
+  if [[ "$editor_uses_writer_session" -eq 0 ]]; then
+    acpx "$editor" sessions close "pipe-editor" 2>/dev/null || true
+  fi
 }
 
 # ─── Protocol 1: Parallel Fan-Out ──────────────────────────────
@@ -105,6 +152,9 @@ protocol_fanout() {
   done < <(_get_agents_or_default "$agents_spec")
 
   workspace_init "$task" "fanout"
+
+  # Ensure session cleanup on exit (success or failure)
+  trap '_cleanup_sessions "fanout" "${agents[*]}"' EXIT
 
   # ── Phase 1: Plan (parallel fan-out) ──
   workspace_set_phase "plan"
@@ -131,9 +181,8 @@ protocol_fanout() {
   workspace_set_phase "done"
   echo "==> Fan-Out complete. See $ACPX_WORKSPACE/synthesis.md"
 
-  for agent in "${agents[@]}"; do
-    acpx "${agent}" sessions close "fanout-${agent}" 2>/dev/null || true
-  done
+  # Clear trap - sessions will be closed by it on exit
+  trap - EXIT
 }
 
 # ─── Protocol 2: Round-Robin Deliberation ──────────────────────
@@ -149,6 +198,9 @@ protocol_deliberation() {
   done < <(_get_agents_or_default "$agents_spec")
 
   workspace_init "$task" "deliberation"
+
+  # Ensure session cleanup on exit
+  trap '_cleanup_sessions "delib" "${agents[*]}"' EXIT
 
   # ── Phase 1: Plan - Round 1 ──
   workspace_set_phase "plan"
@@ -178,6 +230,7 @@ protocol_deliberation() {
     synthesize_plan "$orchestrator"
     workspace_set_phase "done"
     echo "==> Deliberation complete. See $ACPX_WORKSPACE/synthesis.md"
+    trap - EXIT
     return
   fi
 
@@ -212,9 +265,7 @@ ${all_r1}"
   echo "==> Plan phase complete. Ready to execute."
   echo "==> Run: acpx-council execute --from-workspace"
 
-  for agent in "${agents[@]}"; do
-    acpx "${agent}" sessions close "delib-${agent}" 2>/dev/null || true
-  done
+  trap - EXIT
 }
 
 # ─── Protocol 3: Role-Specialized Council (Recommended) ────────
@@ -247,6 +298,9 @@ protocol_role_council() {
   fi
 
   workspace_init "$task" "role-council"
+
+  # Ensure session cleanup on exit
+  trap '_cleanup_sessions "council" "${agents[*]}"' EXIT
 
   # ── Phase 1: Plan - Round 1 with roles ──
   workspace_set_phase "plan"
@@ -287,6 +341,7 @@ ${task}"
     synthesize_plan "$orchestrator"
     workspace_set_phase "execute"
     echo "==> Plan ready. See $ACPX_WORKSPACE/plan.md"
+    trap - EXIT
     return
   fi
 
@@ -324,9 +379,7 @@ ${all_r1}"
   workspace_set_phase "execute"
   echo "==> Plan ready. See $ACPX_WORKSPACE/plan.md"
 
-  for agent in "${agents[@]}"; do
-    acpx "${agent}" sessions close "council-${agent}" 2>/dev/null || true
-  done
+  trap - EXIT
 }
 
 # ─── Protocol 4: Adversarial Debate ────────────────────────────
@@ -361,6 +414,9 @@ protocol_adversarial() {
   acpx "$advocate" sessions new --name "$s_advocate" 2>/dev/null || true
   acpx "$critic" sessions new --name "$s_critic" 2>/dev/null || true
   acpx "$judge" sessions new --name "$s_judge" 2>/dev/null || true
+
+  # Ensure session cleanup on exit
+  trap '_cleanup_sessions_adversarial "$advocate" "$critic" "$judge" "$s_advocate" "$s_critic" "$s_judge"' EXIT
 
   # Round 1: Opening arguments
   echo "==> Opening arguments..."
@@ -450,9 +506,7 @@ Provide:
   workspace_set_phase "execute"
   echo "==> Debate complete. See $ACPX_WORKSPACE/synthesis.md"
 
-  acpx "$advocate" sessions close "$s_advocate" 2>/dev/null || true
-  acpx "$critic" sessions close "$s_critic" 2>/dev/null || true
-  acpx "$judge" sessions close "$s_judge" 2>/dev/null || true
+  trap - EXIT
 }
 
 # ─── Protocol 5: Sequential Pipeline ───────────────────────────
@@ -480,6 +534,9 @@ protocol_pipeline() {
 
   echo "==> Protocol 5: Pipeline"
   echo "    Writer: ${writer} → Reviewer: ${reviewer} → Editor: ${editor}"
+
+  # Ensure session cleanup on exit
+  trap '_cleanup_sessions_pipeline "$writer" "$reviewer" "$editor" "$editor_uses_writer_session"' EXIT
 
   # Step 1: Plan (writer)
   echo "==> [Plan] Writer analyzing..."
@@ -526,11 +583,7 @@ ${writer_output}" | workspace_write_agent_output "editor" 1
   workspace_set_phase "execute"
   echo "==> Pipeline complete. See $ACPX_WORKSPACE/synthesis.md"
 
-  acpx "$writer" sessions close "pipe-writer" 2>/dev/null || true
-  acpx "$reviewer" sessions close "pipe-reviewer" 2>/dev/null || true
-  if [[ "$editor_uses_writer_session" -eq 0 ]]; then
-    acpx "$editor" sessions close "pipe-editor" 2>/dev/null || true
-  fi
+  trap - EXIT
 }
 
 # ─── Protocol Auto-Select ──────────────────────────────────────

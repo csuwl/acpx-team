@@ -55,6 +55,7 @@ PROTOCOL="auto"
 AGENTS="auto"
 ROLES="auto"
 ORCHESTRATOR="claude"
+ORCHESTRATOR_EXPLICIT=""  # Track if user explicitly set orchestrator
 PRESET=""
 TASK=""
 FILE=""
@@ -73,7 +74,10 @@ parse_opts() {
       --roles|-r)
         ROLES="$2"; shift 2 ;;
       --orchestrator|-o)
-        ORCHESTRATOR="$2"; shift 2 ;;
+        ORCHESTRATOR="$2"
+        ORCHESTRATOR_EXPLICIT="yes"
+        shift 2
+        ;;
       --preset|-t)
         PRESET="$2"; shift 2 ;;
       --single-agent|-s)
@@ -166,8 +170,8 @@ cmd_council_impl() {
       agent_list+=("${SINGLE_AGENT}")
     done
     AGENTS=$(IFS=,; echo "${agent_list[*]}")
-    # Auto-set orchestrator to match single agent when not explicitly set
-    if [[ "$ORCHESTRATOR" == "claude" ]]; then
+    # Only auto-set orchestrator if user didn't explicitly set one
+    if [[ -z "$ORCHESTRATOR_EXPLICIT" ]]; then
       ORCHESTRATOR="$SINGLE_AGENT"
       info "Auto-set orchestrator to ${ORCHESTRATOR}"
     fi

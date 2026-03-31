@@ -23,7 +23,8 @@
   "files": [
     "acpx/",
     "acpx-council.js",
-    "acpx-butler.js"
+    "acpx-butler.js",
+    "README.md"
   ],
   "scripts": {
     "test": "bash -n acpx/bin/acpx-council && bash -n acpx/bin/acpx-butler && bash -n acpx/lib/*.sh && echo 'All scripts pass syntax check'",

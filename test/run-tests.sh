@@ -509,9 +509,9 @@ assert_eq "no nameref (Bash 4.3 compat)" "0" "$nameref_count"
 readarray_count=$(grep -r "readarray" "$ACPX_ROOT"/lib/*.sh "$ACPX_ROOT/bin/acpx-council" 2>/dev/null | wc -l | tr -d ' ')
 assert_eq "no readarray (Bash 3.2 compat)" "0" "$readarray_count"
 
-# All temp files use mktemp (cross-platform)
+# All temp file creation uses mktemp (not hardcoded paths)
 mktemp_count=$(grep -r "mktemp" "$ACPX_ROOT"/lib/*.sh "$ACPX_ROOT/bin/acpx-council" 2>/dev/null | wc -l | tr -d ' ')
-assert_eq "uses mktemp for temp files" "0" "$mktemp_count"
+assert_eq "uses mktemp for temp files" "4" "$mktemp_count"
 
 # No GNU-specific sed flags
 gnu_sed=$(grep -r "sed -i " "$ACPX_ROOT"/lib/*.sh "$ACPX_ROOT/bin/acpx-council" 2>/dev/null | wc -l | tr -d ' ')

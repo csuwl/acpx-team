@@ -91,6 +91,17 @@ _step_read_field() {
 
 # ─── Variable Substitution ─────────────────────────────────────
 
+# Escape sed special characters (|, &, \, and newlines)
+_sed_escape() {
+  local text="$1"
+  # Escape backslashes first, then other special chars
+  text="${text//\\/\\\\}"
+  text="${text//|/\\|}"
+  text="${text//&/\\&}"
+  text="${text//$'\n'/\\n}"
+  printf '%s' "$text"
+}
+
 # Replace {{var}} with actual values from params
 _render_template() {
   local text="$1"
@@ -102,7 +113,10 @@ _render_template() {
     shift
     local key="${param%%=*}"
     local val="${param#*=}"
-    text=$(echo "$text" | sed "s|{{${key}}}|${val}|g")
+    # Security: escape sed special characters in replacement value
+    local escaped_val
+    escaped_val=$(_sed_escape "$val")
+    text=$(echo "$text" | sed "s|{{${key}}}|${escaped_val}|g")
   done
 
   echo "$text"
@@ -254,12 +268,24 @@ STATE
     case "$step_type" in
       shell)
         if [[ -n "$step_command" ]]; then
-          # Use the same safe execution as monitor
-          local tmp_script="${BUTLER_ROOT}/tmp-wf-${current_step_id}.sh"
-          printf '#!/bin/bash\n%s\n' "$step_command" > "$tmp_script"
-          chmod +x "$tmp_script"
-          "$tmp_script" || step_ec=$?
-          rm -f "$tmp_script"
+          # Security: validate command (no newlines/null bytes)
+          if [[ "$step_command" == *$'\n'* ]] || [[ "$step_command" == *$'\0'* ]]; then
+            wf_err "Step command contains invalid characters"
+            step_ec=1
+          else
+            # Security: use mktemp for unpredictable temp file name
+            local tmp_script
+            tmp_script=$(mktemp "${BUTLER_ROOT}/tmp-wf-${current_step_id}.XXXXXXXXXX.sh") || {
+              wf_err "Failed to create temp script for step ${current_step_id}"
+              step_ec=1
+            }
+            if [[ $step_ec -eq 0 ]]; then
+              printf '#!/bin/bash\n%s\n' "$step_command" > "$tmp_script"
+              chmod +x "$tmp_script"
+              "$tmp_script" || step_ec=$?
+              rm -f "$tmp_script"
+            fi
+          fi
         fi
         ;;
       agent)

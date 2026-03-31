@@ -144,13 +144,23 @@ _monitor_exec_shell() {
     return 1
   fi
 
+  # Security: basic command validation (no newlines — bash strings can't hold null bytes)
+  if [[ "$command" == *$'\n'* ]]; then
+    mon_err "Command contains invalid characters for task ${id}"
+    return 1
+  fi
+
   mon_info "Running: ${command}"
   local start_time
   start_time=$(date +%s)
 
-  # Write command to a temp script and execute it
-  # This avoids shell injection issues with variable expansion
-  local tmp_script="${BUTLER_ROOT}/tmp-script-${id}.sh"
+  # Security: use mktemp for unpredictable temp file name
+  local tmp_script
+  tmp_script=$(mktemp "${BUTLER_ROOT}/tmp-script-${id}.XXXXXXXXXX.sh") || {
+    mon_err "Failed to create temp script for task ${id}"
+    return 1
+  }
+
   printf '#!/bin/bash\n%s\n' "$command" > "$tmp_script"
   chmod +x "$tmp_script"
 
@@ -164,7 +174,7 @@ _monitor_exec_shell() {
     "$tmp_script" > "$log_file" 2>&1 || ec=$?
   fi
 
-  # Clean up temp script
+  # Clean up temp script (always run, even if timeout/interrupt)
   rm -f "$tmp_script"
 
   local end_time
